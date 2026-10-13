@@ -1,0 +1,26 @@
+{
+  "name": "wholesale-catalogue-platform",
+  "version": "1.0.0",
+  "description": "Multi-Tenant Wholesale Catalogue & WhatsApp Ordering Platform",
+  "private": true,
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "start:backend": "npm --prefix backend run start",
+    "bootstrap": "npm --prefix backend run bootstrap:admin",
+    "seed": "npm --prefix backend run seed:demo"
+  },
+  "keywords": [
+    "multi-tenant",
+    "wholesale",
+    "catalogue",
+    "ecommerce",
+    "whatsapp-orders",
+    "mern",
+    "typescript"
+  ],
+  "author": "Engineering Team",
+  "license": "MIT"
+}
