@@ -29,9 +29,9 @@ const startServer = async (): Promise<void> => {
       console.warn(`[Security] Super Admin bootstrap warning: ${bootstrapErr.message}`);
     }
 
-    const server = app.listen(config.port, () => {
+    const server = app.listen(config.port, '0.0.0.0', () => {
       console.log('============================================================');
-      console.log(`🚀 WholesaleFlow Server started on port ${config.port}`);
+      console.log(`🚀 WholesaleFlow Server started on port ${config.port} (0.0.0.0)`);
       console.log(`📡 Environment: ${config.env}`);
       console.log(`🔗 API Base: ${config.apiBaseUrl}`);
       console.log('============================================================');

@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "description": "Multi-Tenant Wholesale Catalogue & WhatsApp Ordering Platform",
   "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
+    "build": "npm --prefix backend install && npm --prefix backend run build",
+    "start": "npm --prefix backend run start",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "build:backend": "npm --prefix backend run build",

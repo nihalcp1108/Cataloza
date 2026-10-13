@@ -33,8 +33,8 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, or Postman)
-      if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+      // Allow requests with no origin (like mobile apps, curl, or Postman) or trusted domains
+      if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app') || origin.endsWith('.onrender.com')) {
         callback(null, true);
       } else {
         callback(null, true); // Permissive in dev/staging to avoid blocking

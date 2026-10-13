@@ -6,14 +6,14 @@ export const connectDatabase = async (): Promise<void> => {
     mongoose.set('strictQuery', true);
     
     await mongoose.connect(config.mongoUri, {
-      autoIndex: true,
-      serverSelectionTimeoutMS: 5000,
+      autoIndex: !config.isProduction,
+      serverSelectionTimeoutMS: 10000,
     });
     
     console.log(`[Database] Successfully connected to MongoDB: ${mongoose.connection.name}`);
   } catch (error) {
-    console.error('[Database] MongoDB connection error:', error);
-    // Don't kill process immediately in development so hot reload / recovery can take effect
+    console.error('[Database] Critical MongoDB connection error:', error);
+    console.error('[Database] Hint: Ensure MONGODB_URI is set in Render environment variables and Network Access on MongoDB Atlas includes 0.0.0.0/0 (Allow from anywhere).');
     if (config.isProduction) {
       process.exit(1);
     }
