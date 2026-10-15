@@ -33,7 +33,7 @@ export class ShopAdminController {
   public static async getDashboard(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const shopId = ShopAdminController.getShopId(req);
-      const shop = await Shop.findById(shopId).select('name businessName slug logo currency currencySymbol branding accentColor');
+      const shop = await Shop.findById(shopId).select('name businessName slug logo currency currencySymbol branding accentColor').lean();
 
       const [
         totalProducts,
@@ -61,7 +61,8 @@ export class ShopAdminController {
         Order.find({ shopId })
           .sort({ createdAt: -1 })
           .limit(6)
-          .select('orderNumber grandTotal orderStatus paymentStatus createdAt customerSnapshot items orderSource'),
+          .select('orderNumber grandTotal orderStatus paymentStatus createdAt customerSnapshot items orderSource')
+          .lean(),
       ]);
 
       // Calculate Total Order Value (all valid orders excluding cancelled)
@@ -278,7 +279,8 @@ export class ShopAdminController {
           .populate('categoryId', 'name')
           .sort({ createdAt: -1 })
           .skip(skip)
-          .limit(limit),
+          .limit(limit)
+          .lean(),
         Product.countDocuments(filter),
       ]);
 

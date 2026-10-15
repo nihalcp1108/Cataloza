@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight, AlertTriangle } from 'lucide-react';
 import { useCart } from '../../contexts/CartContext';
 import { Button } from '../common/Button';
+import { getOptimizedImageUrl } from '../../utils/imageOptimizer';
 
 export const CartDrawer: React.FC = () => {
   const { cart, currentShopSlug, isCartOpen, setIsCartOpen, updateQuantity, removeFromCart, clearCart } =
@@ -80,12 +81,14 @@ export const CartDrawer: React.FC = () => {
                   className="flex gap-4 p-3.5 rounded-xl border border-slate-200/80 bg-white shadow-sm"
                 >
                   <img
-                    src={
+                    src={getOptimizedImageUrl(
                       item.image ||
-                      'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'
-                    }
+                      'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80',
+                      { width: 120, quality: 75 }
+                    )}
                     alt={item.name}
                     className="w-16 h-16 rounded-lg object-cover bg-slate-100 flex-shrink-0"
+                    loading="lazy"
                   />
 
                   <div className="flex-1 min-w-0">

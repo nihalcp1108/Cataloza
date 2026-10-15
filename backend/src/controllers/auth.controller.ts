@@ -480,7 +480,9 @@ export class AuthController {
         return;
       }
 
-      const user = await User.findById(req.user.userId).populate('assignedShopIds', 'name slug logo status');
+      const user = await User.findById(req.user.userId)
+        .populate('assignedShopIds', 'name slug logo status')
+        .lean();
       if (!user) {
         res.status(404).json({ success: false, message: 'User not found' });
         return;

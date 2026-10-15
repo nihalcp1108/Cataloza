@@ -5,6 +5,8 @@ import { IProduct } from '../../types';
 import { useCart } from '../../contexts/CartContext';
 import { Button } from '../common/Button';
 
+import { getOptimizedImageUrl } from '../../utils/imageOptimizer';
+
 interface ProductCardProps {
   product: IProduct;
   shopSlug: string;
@@ -20,10 +22,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const [quantity, setQuantity] = useState(product.minimumOrderQuantity || 1);
   const [isAdding, setIsAdding] = useState(false);
 
-  const mainImage =
+  const rawImage =
     product.images && product.images.length > 0
       ? product.images[0]
       : 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
+
+  const mainImage = getOptimizedImageUrl(rawImage, { width: 480, quality: 'auto' });
 
   const isOutOfStock = product.trackInventory && product.stockQuantity <= 0;
 

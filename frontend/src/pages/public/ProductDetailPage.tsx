@@ -21,6 +21,7 @@ import { ProductCard } from '../../components/catalogue/ProductCard';
 import { CartDrawer } from '../../components/cart/CartDrawer';
 import { DifferentShopModal } from '../../components/cart/DifferentShopModal';
 import { Button } from '../../components/common/Button';
+import { getOptimizedImageUrl } from '../../utils/imageOptimizer';
 
 export const ProductDetailPage: React.FC = () => {
   const { shopSlug, productSlug } = useParams<{ shopSlug: string; productSlug: string }>();
@@ -128,9 +129,10 @@ export const ProductDetailPage: React.FC = () => {
             <div className="space-y-4">
               <div className="aspect-square rounded-2xl bg-slate-100 overflow-hidden border border-slate-200/60 relative">
                 <img
-                  src={images[activeImageIndex]}
+                  src={getOptimizedImageUrl(images[activeImageIndex], { width: 900, quality: 85 })}
                   alt={product.name}
                   className="w-full h-full object-cover object-center"
+                  loading="eager"
                 />
                 {product.isFeatured && (
                   <span className="absolute top-4 left-4 bg-amber-500 text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider shadow-sm">
@@ -149,7 +151,12 @@ export const ProductDetailPage: React.FC = () => {
                         activeImageIndex === idx ? 'border-blue-600' : 'border-slate-200 hover:border-slate-300'
                       }`}
                     >
-                      <img src={img} alt="" className="w-full h-full object-cover" />
+                      <img
+                        src={getOptimizedImageUrl(img, { width: 160, quality: 75 })}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
                     </button>
                   ))}
                 </div>

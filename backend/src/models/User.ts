@@ -103,6 +103,10 @@ const UserSchema = new Schema<IUser>(
   }
 );
 
+// Performance compound indexes
+UserSchema.index({ role: 1, isActive: 1 });
+UserSchema.index({ email: 1, isActive: 1 });
+
 // Compare password
 UserSchema.methods.comparePassword = async function (candidate: string): Promise<boolean> {
   return bcrypt.compare(candidate, this.passwordHash);

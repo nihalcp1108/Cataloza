@@ -18,6 +18,7 @@ import { useCart } from '../../contexts/CartContext';
 import { ShopNavbar } from '../../components/layout/ShopNavbar';
 import { ShopFooter } from '../../components/layout/ShopFooter';
 import { Button } from '../../components/common/Button';
+import { getOptimizedImageUrl } from '../../utils/imageOptimizer';
 
 export const CartPage: React.FC = () => {
   const { shopSlug } = useParams<{ shopSlug: string }>();
@@ -138,12 +139,14 @@ export const CartPage: React.FC = () => {
                       {/* Image + Info */}
                       <div className="flex items-start gap-4 flex-1 min-w-0">
                         <img
-                          src={
+                          src={getOptimizedImageUrl(
                             item.image ||
-                            'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'
-                          }
+                            'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80',
+                            { width: 160, quality: 75 }
+                          )}
                           alt={item.name}
                           className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover bg-slate-100 border border-slate-200/60 flex-shrink-0"
+                          loading="lazy"
                         />
                         <div className="flex-1 min-w-0">
                           <Link

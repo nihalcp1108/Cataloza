@@ -59,5 +59,6 @@ const CategorySchema = new Schema<ICategory>(
 
 // Unique category slug per shop
 CategorySchema.index({ shopId: 1, slug: 1 }, { unique: true });
+CategorySchema.index({ shopId: 1, isActive: 1, displayOrder: 1, name: 1 });
 
 export const Category = mongoose.model<ICategory>('Category', CategorySchema);

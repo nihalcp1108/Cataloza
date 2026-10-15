@@ -144,6 +144,10 @@ ProductSchema.index({ shopId: 1, sku: 1 }, { unique: true });
 ProductSchema.index({ shopId: 1, slug: 1 }, { unique: true });
 ProductSchema.index({ shopId: 1, isActive: 1, categoryId: 1 });
 ProductSchema.index({ shopId: 1, isActive: 1, isFeatured: 1 });
+ProductSchema.index({ shopId: 1, isActive: 1, createdAt: -1 });
+ProductSchema.index({ shopId: 1, isActive: 1, price: 1 });
+ProductSchema.index({ shopId: 1, isActive: 1, price: -1 });
+ProductSchema.index({ shopId: 1, isActive: 1, name: 1 });
 
 // Full text search indexing
 ProductSchema.index(

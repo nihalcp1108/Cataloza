@@ -12,6 +12,8 @@ const queryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       retry: 1,
+      staleTime: 60 * 1000, // Data stays fresh for 1 minute without refetching
+      gcTime: 5 * 60 * 1000, // Unused cached data is kept in memory for 5 minutes
     },
   },
 });

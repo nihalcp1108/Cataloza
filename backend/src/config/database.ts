@@ -7,7 +7,11 @@ export const connectDatabase = async (): Promise<void> => {
     
     await mongoose.connect(config.mongoUri, {
       autoIndex: !config.isProduction,
-      serverSelectionTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 8000,
+      connectTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 15,
+      minPoolSize: 2,
     });
     
     console.log(`[Database] Successfully connected to MongoDB: ${mongoose.connection.name}`);

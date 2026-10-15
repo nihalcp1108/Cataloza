@@ -21,8 +21,10 @@ export class PublicController {
       const featuredShops = await Shop.find({ status: 'active' })
         .select('name slug description logo banner contactPhone whatsappNumber address accentColor')
         .limit(6)
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .lean();
 
+      res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
       res.json({
         success: true,
         data: {
@@ -42,7 +44,7 @@ export class PublicController {
   public static async getShopBySlug(req: Request, res: Response): Promise<void> {
     try {
       const slug = req.params.slug.toLowerCase().trim();
-      const shop = await Shop.findOne({ slug });
+      const shop = await Shop.findOne({ slug }).lean();
 
       if (!shop) {
         res.status(404).json({
@@ -72,18 +74,22 @@ export class PublicController {
         return;
       }
 
-      const categories = await Category.find({ shopId: shop._id, isActive: true })
-        .sort({ displayOrder: 1, name: 1 })
-        .select('name slug image description displayOrder');
+      const [categories, featuredProducts] = await Promise.all([
+        Category.find({ shopId: shop._id, isActive: true })
+          .sort({ displayOrder: 1, name: 1 })
+          .select('name slug image description displayOrder')
+          .lean(),
+        Product.find({
+          shopId: shop._id,
+          isActive: true,
+          isFeatured: true,
+        })
+          .limit(8)
+          .select('name slug sku price compareAtPrice unit images minimumOrderQuantity trackInventory stockQuantity isFeatured')
+          .lean(),
+      ]);
 
-      const featuredProducts = await Product.find({
-        shopId: shop._id,
-        isActive: true,
-        isFeatured: true,
-      })
-        .limit(8)
-        .select('name slug sku price compareAtPrice unit images minimumOrderQuantity trackInventory stockQuantity isFeatured');
-
+      res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
       res.json({
         success: true,
         data: {
@@ -178,12 +184,14 @@ export class PublicController {
           .sort(sort)
           .skip(skip)
           .limit(limit)
-          .select('-__v'),
+          .select('-__v')
+          .lean(),
         Product.countDocuments(filter),
       ]);
 
       const totalPages = Math.ceil(total / limit);
 
+      res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
       res.json({
         success: true,
         data: {
@@ -211,7 +219,7 @@ export class PublicController {
       const shopSlug = req.params.shopSlug.toLowerCase().trim();
       const productSlug = req.params.productSlug.toLowerCase().trim();
 
-      const shop = await Shop.findOne({ slug: shopSlug, status: 'active' });
+      const shop = await Shop.findOne({ slug: shopSlug, status: 'active' }).lean();
       if (!shop) {
         res.status(404).json({ success: false, message: 'Shop not found or inactive' });
         return;
@@ -221,7 +229,9 @@ export class PublicController {
         shopId: shop._id,
         slug: productSlug,
         isActive: true,
-      }).populate('categoryId', 'name slug');
+      })
+        .populate('categoryId', 'name slug')
+        .lean();
 
       if (!product) {
         res.status(404).json({ success: false, message: 'Product not found in this shop' });
@@ -231,16 +241,18 @@ export class PublicController {
       // Related products from the same shop
       const relatedProducts = await Product.find({
         shopId: shop._id,
-        categoryId: product.categoryId,
+        categoryId: (product.categoryId as any)?._id || product.categoryId,
         _id: { $ne: product._id },
         isActive: true,
       })
         .limit(4)
-        .select('name slug sku price compareAtPrice unit images minimumOrderQuantity trackInventory stockQuantity');
+        .select('name slug sku price compareAtPrice unit images minimumOrderQuantity trackInventory stockQuantity')
+        .lean();
 
       // Effective public form fields for display
       const { fields: formFields } = await ProductFormService.getEffectiveFormForShop(shop._id, true);
 
+      res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
       res.json({
         success: true,
         data: {
@@ -261,15 +273,17 @@ export class PublicController {
   public static async getShopCategories(req: Request, res: Response): Promise<void> {
     try {
       const slug = req.params.slug.toLowerCase().trim();
-      const shop = await Shop.findOne({ slug, status: 'active' });
+      const shop = await Shop.findOne({ slug, status: 'active' }).select('_id slug').lean();
       if (!shop) {
         res.status(404).json({ success: false, message: 'Shop not found' });
         return;
       }
 
       const categories = await Category.find({ shopId: shop._id, isActive: true })
-        .sort({ displayOrder: 1, name: 1 });
+        .sort({ displayOrder: 1, name: 1 })
+        .lean();
 
+      res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
       res.json({
         success: true,
         data: { categories },

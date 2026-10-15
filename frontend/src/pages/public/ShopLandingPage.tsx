@@ -14,6 +14,7 @@ import { Pagination } from '../../components/common/Pagination';
 import { CartDrawer } from '../../components/cart/CartDrawer';
 import { DifferentShopModal } from '../../components/cart/DifferentShopModal';
 import { Button } from '../../components/common/Button';
+import { getOptimizedImageUrl } from '../../utils/imageOptimizer';
 
 export const ShopLandingPage: React.FC = () => {
   const { shopSlug } = useParams<{ shopSlug: string }>();
@@ -32,9 +33,18 @@ export const ShopLandingPage: React.FC = () => {
   // Filter state
   const [selectedCategory, setSelectedCategory] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sortBy, setSortBy] = useState('newest');
   const [inStockOnly, setInStockOnly] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Debounce search query to prevent backend request storm on keystrokes
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   useEffect(() => {
     if (shopSlug) {
@@ -42,7 +52,7 @@ export const ShopLandingPage: React.FC = () => {
     }
   }, [shopSlug, setShopSlug]);
 
-  // Fetch shop details
+  // Fetch shop details concurrently with products
   useEffect(() => {
     const fetchShop = async () => {
       if (!shopSlug) return;
@@ -75,7 +85,7 @@ export const ShopLandingPage: React.FC = () => {
         sortBy,
       };
       if (selectedCategory) params.categoryId = selectedCategory;
-      if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
       if (inStockOnly) params.inStock = 'true';
 
       const res = await api.get(`/public/shops/${shopSlug}/products`, { params });
@@ -92,13 +102,12 @@ export const ShopLandingPage: React.FC = () => {
     } finally {
       setIsLoadingProducts(false);
     }
-  }, [shopSlug, currentPage, selectedCategory, searchQuery, sortBy, inStockOnly]);
+  }, [shopSlug, currentPage, selectedCategory, debouncedSearch, sortBy, inStockOnly]);
 
+  // Trigger product fetch immediately when filters change without blocking on shop details
   useEffect(() => {
-    if (!isLoadingShop && shop) {
-      fetchProducts();
-    }
-  }, [isLoadingShop, shop, fetchProducts]);
+    fetchProducts();
+  }, [fetchProducts]);
 
   const handleClearFilters = () => {
     setSelectedCategory('');
@@ -185,9 +194,10 @@ export const ShopLandingPage: React.FC = () => {
               <div className="flex items-start gap-5 max-w-2xl">
                 {shop.logo ? (
                   <img
-                    src={shop.logo}
+                    src={getOptimizedImageUrl(shop.logo, { width: 200, quality: 85 })}
                     alt={shop.name}
                     className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover border border-slate-200 shadow-md shrink-0"
+                    loading="eager"
                   />
                 ) : (
                   <div

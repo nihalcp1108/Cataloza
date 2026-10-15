@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
+import compression from 'compression';
 import { config } from './config';
 import apiRouter from './routes';
 import { errorHandler } from './middleware/errorHandler';
@@ -12,6 +13,20 @@ const app: Application = express();
 
 // Trust reverse proxy for deployment on Railway / Render / reverse proxies
 app.set('trust proxy', 1);
+
+// Response compression (Gzip / Deflate) to drastically reduce JSON and payload transfer sizes
+app.use(
+  compression({
+    level: 6,
+    threshold: 1024, // only compress responses larger than 1KB
+    filter: (req, res) => {
+      if (req.headers['x-no-compression']) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  })
+);
 
 // Security Headers
 app.use(

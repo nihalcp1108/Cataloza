@@ -371,38 +371,67 @@ export class SuperAdminController {
         Shop.countDocuments(filter),
       ]);
 
-      // Enrich with admin users and counts
-      const enrichedShops = await Promise.all(
-        shops.map(async (shop) => {
-          const [productCount, orderCount, adminUsers] = await Promise.all([
-            Product.countDocuments({ shopId: shop._id }),
-            Order.countDocuments({ shopId: shop._id }),
-            User.find({ assignedShopIds: shop._id }).select('name email phone isActive'),
-          ]);
+      const shopIds = shops.map((s) => s._id);
 
-          const sub: any = shop.subscriptionId;
-          const plan = sub?.planId;
+      // Bulk aggregate product counts, order counts, and admin users in 3 fast queries instead of 45 queries
+      const [productCountsAgg, orderCountsAgg, allAdmins] = await Promise.all([
+        Product.aggregate([
+          { $match: { shopId: { $in: shopIds } } },
+          { $group: { _id: '$shopId', count: { $sum: 1 } } },
+        ]),
+        Order.aggregate([
+          { $match: { shopId: { $in: shopIds } } },
+          { $group: { _id: '$shopId', count: { $sum: 1 } } },
+        ]),
+        User.find({ assignedShopIds: { $in: shopIds } })
+          .select('name email phone isActive assignedShopIds')
+          .lean(),
+      ]);
 
-          return {
-            ...shop.toObject(),
-            productCount,
-            orderCount,
-            admins: adminUsers,
-            subscription: sub
-              ? {
-                  _id: sub._id,
-                  planName: plan?.name || sub.planSnapshot?.name || 'Standard Plan',
-                  status: sub.status,
-                  startDate: sub.startDate,
-                  endDate: sub.endDate,
-                  renewalDate: sub.renewalDate || sub.endDate,
-                  paymentStatus: sub.paymentStatus || 'paid',
-                }
-              : null,
-            publicUrl: `${config.publicAppUrl}/${shop.slug}`,
-          };
-        })
-      );
+      const productCountMap = new Map<string, number>();
+      productCountsAgg.forEach((item) => productCountMap.set(item._id.toString(), item.count));
+
+      const orderCountMap = new Map<string, number>();
+      orderCountsAgg.forEach((item) => orderCountMap.set(item._id.toString(), item.count));
+
+      const adminsByShopMap = new Map<string, any[]>();
+      allAdmins.forEach((admin) => {
+        (admin.assignedShopIds || []).forEach((sId: any) => {
+          const key = sId.toString();
+          if (!adminsByShopMap.has(key)) adminsByShopMap.set(key, []);
+          adminsByShopMap.get(key)!.push(admin);
+        });
+      });
+
+      // Enrich with cached metrics
+      const enrichedShops = shops.map((shop) => {
+        const sId = shop._id.toString();
+        const productCount = productCountMap.get(sId) || 0;
+        const orderCount = orderCountMap.get(sId) || 0;
+        const adminUsers = adminsByShopMap.get(sId) || [];
+
+        const sub: any = shop.subscriptionId;
+        const plan = sub?.planId;
+
+        return {
+          ...shop.toObject(),
+          productCount,
+          orderCount,
+          admins: adminUsers,
+          subscription: sub
+            ? {
+                _id: sub._id,
+                planName: plan?.name || sub.planSnapshot?.name || 'Standard Plan',
+                status: sub.status,
+                startDate: sub.startDate,
+                endDate: sub.endDate,
+                renewalDate: sub.renewalDate || sub.endDate,
+                paymentStatus: sub.paymentStatus || 'paid',
+              }
+            : null,
+          publicUrl: `${config.publicAppUrl}/${shop.slug}`,
+        };
+      });
 
       const totalPages = Math.ceil(total / limit);
 
@@ -678,19 +707,19 @@ export class SuperAdminController {
   public static async getShopFullDetails(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const shop = await Shop.findById(id).populate('subscriptionId productFormTemplateId');
+      const shop = await Shop.findById(id).populate('subscriptionId productFormTemplateId').lean();
       if (!shop) {
         res.status(404).json({ success: false, message: 'Shop not found' });
         return;
       }
 
       const [admins, products, categories, orders, subscription, auditLogs] = await Promise.all([
-        User.find({ assignedShopIds: shop._id }).select('name email phone isActive lastLogin createdAt'),
-        Product.find({ shopId: shop._id }).populate('categoryId', 'name').sort({ createdAt: -1 }).limit(20),
-        Category.find({ shopId: shop._id }).sort({ displayOrder: 1 }),
-        Order.find({ shopId: shop._id }).sort({ createdAt: -1 }).limit(25),
-        ShopSubscription.findOne({ shopId: shop._id }).populate('planId'),
-        AuditLog.find({ shopId: shop._id }).populate('actorId', 'name email role').sort({ timestamp: -1 }).limit(20),
+        User.find({ assignedShopIds: shop._id }).select('name email phone isActive lastLogin createdAt').lean(),
+        Product.find({ shopId: shop._id }).populate('categoryId', 'name').sort({ createdAt: -1 }).limit(20).lean(),
+        Category.find({ shopId: shop._id }).sort({ displayOrder: 1 }).lean(),
+        Order.find({ shopId: shop._id }).sort({ createdAt: -1 }).limit(25).lean(),
+        ShopSubscription.findOne({ shopId: shop._id }).populate('planId').lean(),
+        AuditLog.find({ shopId: shop._id }).populate('actorId', 'name email role').sort({ timestamp: -1 }).limit(20).lean(),
       ]);
 
       // Calculate shop-specific customer directory and wholesale order volume
