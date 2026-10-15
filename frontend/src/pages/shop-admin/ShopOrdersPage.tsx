@@ -10,6 +10,10 @@ import {
   Calendar,
   Phone,
   Store,
+  MessageCircle,
+  Clock,
+  CheckCircle,
+  Package,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { IOrder, OrderStatus, PaymentStatus } from '../../types';
@@ -20,6 +24,12 @@ import { TableRowSkeleton } from '../../components/common/LoadingSkeleton';
 
 export const ShopOrdersPage: React.FC = () => {
   const [orders, setOrders] = useState<IOrder[]>([]);
+  const [summary, setSummary] = useState({
+    totalOrders: 0,
+    pendingOrders: 0,
+    confirmedOrders: 0,
+    deliveredOrders: 0,
+  });
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -27,20 +37,27 @@ export const ShopOrdersPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<string>('');
   const [paymentStatus, setPaymentStatus] = useState<string>('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [page, setPage] = useState(1);
 
   const fetchOrders = async () => {
     try {
       setIsLoading(true);
       const params: any = { page, limit: 12 };
-      if (search) params.search = search;
+      if (search.trim()) params.search = search.trim();
       if (status) params.status = status;
       if (paymentStatus) params.paymentStatus = paymentStatus;
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
 
       const res = await api.get('/shop-admin/orders', { params });
       if (res.data?.success) {
         setOrders(res.data.data.orders);
         setPagination(res.data.data.pagination);
+        if (res.data.data.summary) {
+          setSummary(res.data.data.summary);
+        }
       }
     } catch {
       setOrders([]);
@@ -51,7 +68,7 @@ export const ShopOrdersPage: React.FC = () => {
 
   useEffect(() => {
     fetchOrders();
-  }, [page, search, status, paymentStatus]);
+  }, [page, search, status, paymentStatus, startDate, endDate]);
 
   const handleDownloadInvoice = async (orderId: string, orderNumber: string) => {
     try {
@@ -72,18 +89,89 @@ export const ShopOrdersPage: React.FC = () => {
     }
   };
 
+  const getCleanCustomerPhone = (ord: IOrder): string => {
+    const raw =
+      ord.deliveryAddress?.whatsapp ||
+      ord.customerSnapshot?.whatsapp ||
+      ord.deliveryAddress?.phone ||
+      ord.customerSnapshot?.phone ||
+      '';
+    let cleaned = raw.replace(/[^0-9]/g, '');
+    if (cleaned.length === 10) cleaned = `91${cleaned}`;
+    return cleaned;
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-black text-slate-900 tracking-tight">Wholesale Orders</h1>
         <p className="text-xs text-slate-500 mt-1">
-          Review, confirm fulfillment status, verify payments, and download commercial invoices.
+          Review, confirm fulfillment status, verify customer WhatsApp bills, and process orders.
         </p>
       </div>
 
+      {/* Summary KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+              Total Orders
+            </span>
+            <span className="text-2xl font-black text-slate-900 mt-1 block">
+              {summary.totalOrders}
+            </span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+            <ShoppingBag className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-amber-600 uppercase tracking-wider block">
+              Pending Confirmation
+            </span>
+            <span className="text-2xl font-black text-amber-600 mt-1 block">
+              {summary.pendingOrders}
+            </span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+            <Clock className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider block">
+              Confirmed / Active
+            </span>
+            <span className="text-2xl font-black text-blue-600 mt-1 block">
+              {summary.confirmedOrders}
+            </span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+            <Package className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider block">
+              Delivered
+            </span>
+            <span className="text-2xl font-black text-emerald-600 mt-1 block">
+              {summary.deliveredOrders}
+            </span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <CheckCircle className="w-5 h-5" />
+          </div>
+        </div>
+      </div>
+
       {/* Filter Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -93,12 +181,12 @@ export const ShopOrdersPage: React.FC = () => {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Search by order number, buyer name, or phone..."
+            placeholder="Search by order number, customer name, phone, or town..."
             className="w-full pl-10 pr-4 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
           />
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <select
             value={status}
             onChange={(e) => {
@@ -142,11 +230,11 @@ export const ShopOrdersPage: React.FC = () => {
               <tr>
                 <th className="py-3 px-4">Order No</th>
                 <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Customer & Phone</th>
+                <th className="py-3 px-4">Customer & Contact</th>
+                <th className="py-3 px-4">Source</th>
                 <th className="py-3 px-4">Items Summary</th>
-                <th className="py-3 px-4">Grand Total</th>
+                <th className="py-3 px-4">Total Amount</th>
                 <th className="py-3 px-4">Fulfillment</th>
-                <th className="py-3 px-4">Payment</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -156,68 +244,104 @@ export const ShopOrdersPage: React.FC = () => {
               ) : orders.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-slate-400">
-                    No orders found matching the criteria.
+                    No orders found matching the filter criteria.
                   </td>
                 </tr>
               ) : (
-                orders.map((ord) => (
-                  <tr key={ord._id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
-                      <Link to={`/admin/orders/${ord._id}`} className="hover:text-blue-600">
-                        {ord.orderNumber}
-                      </Link>
-                    </td>
+                orders.map((ord) => {
+                  const custPhone = getCleanCustomerPhone(ord);
+                  const isGuestOrder = ord.orderSource !== 'registered_customer';
 
-                    <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
-                      {new Date(ord.createdAt).toLocaleDateString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                    </td>
-
-                    <td className="py-3.5 px-4">
-                      <span className="font-semibold text-slate-900 block">{ord.customerSnapshot?.name}</span>
-                      <span className="text-[11px] text-slate-400 block">{ord.customerSnapshot?.phone}</span>
-                    </td>
-
-                    <td className="py-3.5 px-4 text-slate-600 max-w-xs truncate">
-                      {ord.items.length} item{ord.items.length !== 1 ? 's' : ''}:{' '}
-                      {ord.items.map((i) => i.name).join(', ')}
-                    </td>
-
-                    <td className="py-3.5 px-4 font-bold text-slate-900 whitespace-nowrap">
-                      ₹{ord.grandTotal.toLocaleString('en-IN')}
-                    </td>
-
-                    <td className="py-3.5 px-4">
-                      <Badge status={ord.orderStatus} type="order" />
-                    </td>
-
-                    <td className="py-3.5 px-4">
-                      <Badge status={ord.paymentStatus} type="payment" />
-                    </td>
-
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Link
-                          to={`/admin/orders/${ord._id}`}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-slate-100"
-                          title="View Order Details"
-                        >
-                          <Eye className="w-4 h-4" />
+                  return (
+                    <tr key={ord._id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
+                        <Link to={`/admin/orders/${ord._id}`} className="hover:text-blue-600">
+                          {ord.orderNumber}
                         </Link>
-                        <button
-                          onClick={() => handleDownloadInvoice(ord._id, ord.orderNumber)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-                          title="Download Invoice"
-                        >
-                          <Download className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+
+                      <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
+                        {new Date(ord.createdAt).toLocaleDateString('en-IN', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </td>
+
+                      <td className="py-3.5 px-4">
+                        <span className="font-semibold text-slate-900 block">
+                          {ord.deliveryAddress?.fullName || ord.customerSnapshot?.name}
+                        </span>
+                        <span className="text-[11px] text-slate-500 block">
+                          {ord.deliveryAddress?.phone || ord.customerSnapshot?.phone}
+                        </span>
+                        {ord.deliveryAddress?.city && (
+                          <span className="text-[10px] text-slate-400 block">
+                            {ord.deliveryAddress.city}, {ord.deliveryAddress.state}
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="py-3.5 px-4">
+                        {isGuestOrder ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
+                            <MessageCircle className="w-3 h-3 text-emerald-600" />
+                            Guest WhatsApp
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">
+                            Customer Account
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="py-3.5 px-4 text-slate-600 max-w-xs truncate">
+                        {ord.items.length} item{ord.items.length !== 1 ? 's' : ''}:{' '}
+                        {ord.items.map((i) => i.name).join(', ')}
+                      </td>
+
+                      <td className="py-3.5 px-4 font-bold text-slate-900 whitespace-nowrap">
+                        {ord.currencySymbol || '₹'}{ord.grandTotal.toLocaleString('en-IN')}
+                      </td>
+
+                      <td className="py-3.5 px-4">
+                        <Badge status={ord.orderStatus} type="order" />
+                      </td>
+
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {custPhone && (
+                            <a
+                              href={`https://wa.me/${custPhone}?text=${encodeURIComponent(
+                                `Hello ${ord.deliveryAddress?.fullName || ord.customerSnapshot?.name}, this is regarding your wholesale order ${ord.orderNumber}.`
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 rounded-lg text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition-colors"
+                              title="Chat with Customer on WhatsApp"
+                            >
+                              <MessageCircle className="w-4 h-4" />
+                            </a>
+                          )}
+                          <Link
+                            to={`/admin/orders/${ord._id}`}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-slate-100 transition-colors"
+                            title="View Order Details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Link>
+                          <button
+                            onClick={() => handleDownloadInvoice(ord._id, ord.orderNumber)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                            title="Download PDF Invoice"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

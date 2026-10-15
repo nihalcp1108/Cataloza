@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 // Public pages
 import { ShopLandingPage } from '../pages/public/ShopLandingPage';
 import { ProductDetailPage } from '../pages/public/ProductDetailPage';
+import { CartPage } from '../pages/public/CartPage';
 import { LoginPage } from '../pages/public/LoginPage';
 import { RegisterPage } from '../pages/public/RegisterPage';
 import { ForgotPasswordPage } from '../pages/public/ForgotPasswordPage';
@@ -32,6 +33,10 @@ import { ShopOrdersPage } from '../pages/shop-admin/ShopOrdersPage';
 import { ShopOrderDetailPage } from '../pages/shop-admin/ShopOrderDetailPage';
 import { ShopSettingsPage } from '../pages/shop-admin/ShopSettingsPage';
 import { ShopSubscriptionPage } from '../pages/shop-admin/ShopSubscriptionPage';
+import { ShopProfilePage } from '../pages/shop-admin/ShopProfilePage';
+import { ShopAppearancePage } from '../pages/shop-admin/ShopAppearancePage';
+import { ShopCustomersPage } from '../pages/shop-admin/ShopCustomersPage';
+import { AccountSettingsPage } from '../pages/shop-admin/AccountSettingsPage';
 
 // Super Admin pages
 import { SuperDashboardPage } from '../pages/super-admin/SuperDashboardPage';
@@ -43,6 +48,8 @@ import { PlatformOrdersPage } from '../pages/super-admin/PlatformOrdersPage';
 import { PlatformSettingsPage } from '../pages/super-admin/PlatformSettingsPage';
 import { SubscriptionPlansPage } from '../pages/super-admin/SubscriptionPlansPage';
 import { SubscriptionAssignmentsPage } from '../pages/super-admin/SubscriptionAssignmentsPage';
+import { SubscriptionPaymentsPage } from '../pages/super-admin/SubscriptionPaymentsPage';
+import { RevenueReportsPage } from '../pages/super-admin/RevenueReportsPage';
 import { ProductFormTemplatesListPage } from '../pages/super-admin/ProductFormTemplatesListPage';
 import { ProductFormBuilderPage } from '../pages/super-admin/ProductFormBuilderPage';
 import { AuditLogsPage } from '../pages/super-admin/AuditLogsPage';
@@ -120,7 +127,12 @@ export const AppRoutes: React.FC = () => {
         <Route path="categories" element={<CategoriesPage />} />
         <Route path="orders" element={<ShopOrdersPage />} />
         <Route path="orders/:id" element={<ShopOrderDetailPage />} />
+        <Route path="customers" element={<ShopCustomersPage />} />
+        <Route path="profile" element={<ShopProfilePage />} />
+        <Route path="appearance" element={<ShopAppearancePage />} />
+        <Route path="settings" element={<ShopSettingsPage />} />
         <Route path="shop-settings" element={<ShopSettingsPage />} />
+        <Route path="account" element={<AccountSettingsPage />} />
         <Route path="subscription" element={<ShopSubscriptionPage />} />
       </Route>
 
@@ -139,6 +151,10 @@ export const AppRoutes: React.FC = () => {
         <Route path="subscriptions" element={<Navigate to="/superadmin/subscriptions/plans" replace />} />
         <Route path="subscriptions/plans" element={<SubscriptionPlansPage />} />
         <Route path="subscriptions/assignments" element={<SubscriptionAssignmentsPage />} />
+        <Route path="subscriptions/payments" element={<SubscriptionPaymentsPage />} />
+        <Route path="payments" element={<SubscriptionPaymentsPage />} />
+        <Route path="reports" element={<RevenueReportsPage />} />
+        <Route path="reports/revenue" element={<RevenueReportsPage />} />
         <Route path="product-form-builder" element={<ProductFormTemplatesListPage />} />
         <Route path="product-form-builder/:templateId" element={<ProductFormBuilderPage />} />
         <Route path="orders" element={<PlatformOrdersPage />} />
@@ -152,6 +168,7 @@ export const AppRoutes: React.FC = () => {
       {/* ==================================================== */}
       <Route path="/:shopSlug" element={<ShopLandingPage />} />
       <Route path="/:shopSlug/products" element={<ShopLandingPage />} />
+      <Route path="/:shopSlug/cart" element={<CartPage />} />
       <Route path="/:shopSlug/product/:productSlug" element={<ProductDetailPage />} />
       <Route path="/:shopSlug/checkout" element={<CheckoutPage />} />
       <Route path="/:shopSlug/order/:orderId/confirmation" element={<OrderConfirmationPage />} />

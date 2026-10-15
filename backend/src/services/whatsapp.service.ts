@@ -23,66 +23,77 @@ export class WhatsAppService {
   }
 
   /**
-   * Formats the WhatsApp prefilled message strictly adhering to business guidelines
+   * Formats the WhatsApp prefilled message strictly adhering to Cataloza wholesale bill format
    */
   public static buildOrderMessage(order: IOrder, shop: IShop): string {
     const lines: string[] = [];
+    const sym = order.currencySymbol || '₹';
+    const formattedDate = new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
 
-    lines.push(`Hello ${shop.name},`);
+    lines.push('CATALOZA — ORDER REQUEST');
+    lines.push(`Shop: ${shop.name}`);
+    lines.push(`Order No: ${order.orderNumber}`);
+    lines.push(`Date: ${formattedDate}`);
     lines.push('');
-    lines.push('I would like to confirm my wholesale order.');
-    lines.push('');
-    lines.push(`*Order No:* ${order.orderNumber}`);
-    lines.push('');
-    lines.push('*Items:*');
 
+    lines.push('CUSTOMER DETAILS');
+    lines.push(`Name: ${order.deliveryAddress.fullName || order.customerSnapshot.name}`);
+    lines.push(`Phone: ${order.deliveryAddress.phone || order.customerSnapshot.phone}`);
+    if (order.deliveryAddress.whatsapp || order.customerSnapshot.whatsapp) {
+      lines.push(`WhatsApp: ${order.deliveryAddress.whatsapp || order.customerSnapshot.whatsapp}`);
+    }
+    if (order.deliveryAddress.businessName || order.customerSnapshot.businessName) {
+      lines.push(`Business: ${order.deliveryAddress.businessName || order.customerSnapshot.businessName}`);
+    }
+    lines.push('');
+
+    lines.push('DELIVERY ADDRESS');
+    const addr1 = order.deliveryAddress.addressLine1 || order.deliveryAddress.street || '';
+    if (addr1) lines.push(addr1);
+    if (order.deliveryAddress.addressLine2) lines.push(order.deliveryAddress.addressLine2);
+    const districtPart = order.deliveryAddress.district ? `, ${order.deliveryAddress.district}` : '';
+    lines.push(`${order.deliveryAddress.city}${districtPart}`);
+    lines.push(`${order.deliveryAddress.state} - ${order.deliveryAddress.postalCode}`);
+    lines.push(order.deliveryAddress.country || 'India');
+    lines.push('');
+
+    lines.push('ORDER ITEMS');
     order.items.forEach((item, index) => {
-      const variantStr = item.variantName ? ` (${item.variantName})` : '';
-      lines.push(
-        `${index + 1}. *${item.name}${variantStr}* — SKU: ${item.sku}`
-      );
-      lines.push(
-        `   Quantity: ${item.quantity} ${item.unit || 'unit'}`
-      );
-      lines.push(
-        `   Unit price: ${order.currencySymbol}${item.unitPrice.toLocaleString('en-IN')}`
-      );
-      lines.push(
-        `   Line Total: ${order.currencySymbol}${item.lineTotal.toLocaleString('en-IN')}`
-      );
+      lines.push(`${index + 1}. ${item.name}`);
+      lines.push(`Code: ${item.sku}`);
+      if (item.variantName) {
+        lines.push(`Size: ${item.variantName}`);
+      }
+      lines.push(`Qty: ${item.quantity} ${item.unit || 'unit'}`);
+      lines.push(`Unit Price: ${sym}${item.unitPrice.toLocaleString('en-IN')}`);
+      lines.push(`Total: ${sym}${item.lineTotal.toLocaleString('en-IN')}`);
       lines.push('');
     });
 
-    lines.push(`*Subtotal:* ${order.currencySymbol}${order.subtotal.toLocaleString('en-IN')}`);
+    lines.push('BILL SUMMARY');
+    lines.push(`Subtotal: ${sym}${order.subtotal.toLocaleString('en-IN')}`);
     if (order.deliveryCharge > 0) {
-      lines.push(`*Delivery:* ${order.currencySymbol}${order.deliveryCharge.toLocaleString('en-IN')}`);
+      lines.push(`Shipping: ${sym}${order.deliveryCharge.toLocaleString('en-IN')}`);
     } else {
-      lines.push(`*Delivery:* Free / To be confirmed`);
+      lines.push('Shipping: Free / To be confirmed');
     }
     if (order.discount > 0) {
-      lines.push(`*Discount:* -${order.currencySymbol}${order.discount.toLocaleString('en-IN')}`);
+      lines.push(`Tax / Discount: -${sym}${order.discount.toLocaleString('en-IN')}`);
     }
-    lines.push(`*Grand Total:* ${order.currencySymbol}${order.grandTotal.toLocaleString('en-IN')}`);
-    lines.push('');
-    lines.push('*Customer Details:*');
-    lines.push(`Customer: ${order.deliveryAddress.fullName}`);
-    if (order.deliveryAddress.businessName) {
-      lines.push(`Business: ${order.deliveryAddress.businessName}`);
-    }
-    lines.push(`Phone: ${order.deliveryAddress.phone}`);
-    lines.push(
-      `Delivery Address: ${order.deliveryAddress.street}, ${order.deliveryAddress.city}, ${order.deliveryAddress.state} - ${order.deliveryAddress.postalCode}`
-    );
+    lines.push(`TOTAL: ${sym}${order.grandTotal.toLocaleString('en-IN')}`);
 
     if (order.customerNotes) {
       lines.push('');
-      lines.push(`*Customer Note:* ${order.customerNotes}`);
+      lines.push(`Notes: ${order.customerNotes}`);
     }
 
     lines.push('');
-    lines.push('Please confirm availability and dispatch details.');
-    lines.push('');
-    lines.push('Thank you!');
+    lines.push('Please confirm product availability, final delivery charges, and order acceptance.');
+    lines.push('Order placed through Cataloza.');
 
     return lines.join('\n');
   }

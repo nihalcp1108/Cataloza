@@ -15,7 +15,9 @@ export const ShopNavbar: React.FC<ShopNavbarProps> = ({ shop }) => {
   const { user } = useAuth();
 
   const itemCount = cart?.items?.reduce((acc, item) => acc + item.quantity, 0) || 0;
-  const whatsappUrl = `https://wa.me/${shop.whatsappNumber.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+  const rawPhone = (shop.whatsappNumber || '').replace(/[^0-9]/g, '');
+  const normalizedPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+  const whatsappUrl = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(
     `Hello ${shop.name}, I have an inquiry regarding your wholesale products.`
   )}`;
 

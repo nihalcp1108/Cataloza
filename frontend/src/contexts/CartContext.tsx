@@ -39,10 +39,22 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await api.get(`/shops/${slug}/cart`);
       if (res.data?.success) {
         setCart(res.data.data);
+        try {
+          localStorage.setItem(`cataloza_cart_${slug}`, JSON.stringify(res.data.data));
+        } catch {}
       }
     } catch {
-      // Cart might be empty or shop unavailable
-      setCart(null);
+      // If network fails, try reading cached local cart
+      const cached = localStorage.getItem(`cataloza_cart_${slug}`);
+      if (cached) {
+        try {
+          setCart(JSON.parse(cached));
+        } catch {
+          setCart(null);
+        }
+      } else {
+        setCart(null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -50,6 +62,13 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     if (currentShopSlug) {
+      // Pre-load from local storage cache immediately
+      const cached = localStorage.getItem(`cataloza_cart_${currentShopSlug}`);
+      if (cached) {
+        try {
+          setCart(JSON.parse(cached));
+        } catch {}
+      }
       fetchCart(currentShopSlug);
     }
   }, [currentShopSlug, fetchCart]);
@@ -146,8 +165,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const clearCart = async () => {
     if (!currentShopSlug) return;
     try {
-      await api.delete(`/shops/${currentShopSlug}/cart`);
+      localStorage.removeItem(`cataloza_cart_${currentShopSlug}`);
       setCart(null);
+      await api.delete(`/shops/${currentShopSlug}/cart`);
       toast.success('Cart cleared');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to clear cart');

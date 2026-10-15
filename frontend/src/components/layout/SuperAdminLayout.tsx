@@ -2,11 +2,14 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet, Navigate } from 'react-router-dom';
 import {
   ShieldAlert,
+  ShieldCheck,
   Store,
   PlusCircle,
   Users,
-  ShoppingBag,
-  Sliders,
+  Layers,
+  CreditCard,
+  BarChart3,
+  Settings,
   LogOut,
   Menu,
   X,
@@ -34,15 +37,15 @@ export const SuperAdminLayout: React.FC = () => {
 
   const navigation = [
     { name: 'Dashboard', href: '/superadmin/dashboard', icon: LayoutDashboard },
-    { name: 'Wholesale Shops', href: '/superadmin/shops', icon: Store },
-    { name: 'Create New Shop', href: '/superadmin/shops/new', icon: PlusCircle },
+    { name: 'Shops', href: '/superadmin/shops', icon: Store },
+    { name: 'Add New Shop', href: '/superadmin/shops/new', icon: PlusCircle },
     { name: 'Shop Admins', href: '/superadmin/admins', icon: Users },
-    { name: 'Subscription Plans', href: '/superadmin/subscriptions/plans', icon: Sliders },
-    { name: 'Shop Subscriptions', href: '/superadmin/subscriptions/assignments', icon: ShieldAlert },
-    { name: 'Dynamic Form Builder', href: '/superadmin/product-form-builder', icon: Sliders },
-    { name: 'Platform Orders', href: '/superadmin/orders', icon: ShoppingBag },
+    { name: 'Subscription Plans', href: '/superadmin/subscriptions/plans', icon: Layers },
+    { name: 'Subscriptions', href: '/superadmin/subscriptions/assignments', icon: ShieldCheck },
+    { name: 'Subscription Payments', href: '/superadmin/payments', icon: CreditCard },
+    { name: 'Revenue Reports', href: '/superadmin/reports', icon: BarChart3 },
     { name: 'Audit Logs', href: '/superadmin/audit-logs', icon: ShieldAlert },
-    { name: 'System Settings', href: '/superadmin/settings', icon: Sliders },
+    { name: 'Settings', href: '/superadmin/settings', icon: Settings },
   ];
 
   const handleLogout = async () => {

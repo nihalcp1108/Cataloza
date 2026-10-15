@@ -28,6 +28,8 @@ router.use('/public', publicRoutes);
 router.use('/customers', customerRoutes);
 router.use('/shops', cartRoutes);
 router.use('/shops', checkoutRoutes);
+router.use('/public/shops', cartRoutes);
+router.use('/public/shops', checkoutRoutes);
 router.use('/shop-admin', shopAdminRoutes);
 router.use('/super-admin', superAdminRoutes);
 router.use('/forms', productFormRoutes);

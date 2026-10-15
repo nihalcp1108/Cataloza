@@ -100,7 +100,9 @@ export const ProductDetailPage: React.FC = () => {
     }
   };
 
-  const directWhatsAppInquiryUrl = `https://wa.me/${shop.whatsappNumber.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+  const rawPhone = (shop.whatsappNumber || '').replace(/[^0-9]/g, '');
+  const normalizedPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+  const directWhatsAppInquiryUrl = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(
     `Hello ${shop.name}, I would like to order "${product.name}" (SKU: ${product.sku}, Quantity: ${quantity} ${product.unit}). Please confirm stock and delivery.`
   )}`;
 

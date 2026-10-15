@@ -160,12 +160,21 @@ export const ShopLandingPage: React.FC = () => {
     );
   }
 
-  const whatsappDirectUrl = `https://wa.me/${shop.whatsappNumber.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-    `Hello ${shop.name}, I am viewing your wholesale catalogue on WholesaleFlow.`
+  const rawPhone = (shop.whatsappNumber || '').replace(/[^0-9]/g, '');
+  const normalizedPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+  const whatsappDirectUrl = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(
+    `Hello ${shop.name}, I am viewing your wholesale catalogue on Cataloza.`
   )}`;
 
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    const primaryColor = shop.branding?.primaryColor || shop.accentColor || '#2563eb';
+    const buttonColor = shop.branding?.buttonColor || primaryColor;
+    const customStyle = {
+      '--shop-primary': primaryColor,
+      '--shop-button': buttonColor,
+    } as React.CSSProperties;
+
+    return (
+    <div className="min-h-screen bg-slate-50 flex flex-col" style={customStyle}>
       <ShopNavbar shop={shop} />
 
       <main className="flex-1">
@@ -173,33 +182,54 @@ export const ShopLandingPage: React.FC = () => {
         <section className="bg-white border-b border-slate-200">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div className="space-y-3 max-w-2xl">
-                <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
-                  Public Wholesale Catalogue
-                </div>
+              <div className="flex items-start gap-5 max-w-2xl">
+                {shop.logo ? (
+                  <img
+                    src={shop.logo}
+                    alt={shop.name}
+                    className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover border border-slate-200 shadow-md shrink-0"
+                  />
+                ) : (
+                  <div
+                    className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl flex items-center justify-center text-white font-black text-2xl shadow-md shrink-0"
+                    style={{ backgroundColor: primaryColor }}
+                  >
+                    {shop.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: primaryColor }} />
+                    Verified Wholesale Catalogue
+                  </div>
 
-                <h2 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight leading-tight">
-                  {shop.name}
-                </h2>
+                  <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-tight">
+                    {shop.name}
+                  </h2>
 
-                <p className="text-sm text-slate-600 leading-relaxed">
-                  {shop.description || 'Welcome to our wholesale product catalogue. Browse live wholesale pricing, check minimum order quantities, and submit your orders directly to our dispatch desk via WhatsApp.'}
-                </p>
+                  <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                    {shop.description || 'Welcome to our wholesale product catalogue. Browse live wholesale pricing, check minimum order quantities, and submit your orders directly to our dispatch desk via WhatsApp.'}
+                  </p>
 
-                <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 pt-2">
-                  {shop.address?.city && (
-                    <span className="flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                      {shop.address.city}, {shop.address.state}
-                    </span>
-                  )}
-                  {shop.contactPhone && (
-                    <span className="flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5 text-slate-400" />
-                      {shop.contactPhone}
-                    </span>
-                  )}
+                  <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 pt-1">
+                    {(shop.address?.city || shop.address?.state) && (
+                      <span className="flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                        {[shop.address?.city, shop.address?.state].filter(Boolean).join(', ')}
+                      </span>
+                    )}
+                    {shop.contactPhone && (
+                      <span className="flex items-center gap-1.5">
+                        <Phone className="w-3.5 h-3.5 text-slate-400" />
+                        {shop.contactPhone}
+                      </span>
+                    )}
+                    {shop.businessHours && (
+                      <span className="flex items-center gap-1.5 text-slate-400">
+                        • Hours: {shop.businessHours}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 

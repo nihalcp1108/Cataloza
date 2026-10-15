@@ -11,6 +11,9 @@ import { InvoiceService } from '../services/invoice.service';
 import { AuditService } from '../services/audit.service';
 import { SubscriptionService } from '../services/subscription.service';
 import { ProductFormService } from '../services/productForm.service';
+import { WhatsAppService } from '../services/whatsapp.service';
+import { User } from '../models/User';
+import bcrypt from 'bcryptjs';
 
 export class ShopAdminController {
   /**
@@ -30,35 +33,79 @@ export class ShopAdminController {
   public static async getDashboard(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const shopId = ShopAdminController.getShopId(req);
+      const shop = await Shop.findById(shopId).select('name businessName slug logo currency currencySymbol branding accentColor');
 
       const [
         totalProducts,
         activeProducts,
+        totalCategories,
         totalOrders,
         pendingOrders,
         confirmedOrders,
-        completedOrders,
+        processingOrders,
+        shippedOrders,
+        deliveredOrders,
         cancelledOrders,
         recentOrders,
       ] = await Promise.all([
         Product.countDocuments({ shopId }),
         Product.countDocuments({ shopId, isActive: true }),
+        Category.countDocuments({ shopId }),
         Order.countDocuments({ shopId }),
         Order.countDocuments({ shopId, orderStatus: 'pending' }),
         Order.countDocuments({ shopId, orderStatus: 'confirmed' }),
+        Order.countDocuments({ shopId, orderStatus: 'processing' }),
+        Order.countDocuments({ shopId, orderStatus: 'shipped' }),
         Order.countDocuments({ shopId, orderStatus: 'delivered' }),
         Order.countDocuments({ shopId, orderStatus: 'cancelled' }),
-        Order.find({ shopId }).sort({ createdAt: -1 }).limit(5).select('orderNumber grandTotal orderStatus paymentStatus createdAt customerSnapshot'),
+        Order.find({ shopId })
+          .sort({ createdAt: -1 })
+          .limit(6)
+          .select('orderNumber grandTotal orderStatus paymentStatus createdAt customerSnapshot items orderSource'),
       ]);
 
-      // Calculate revenue (excluding cancelled orders)
-      const revenueAgg = await Order.aggregate([
+      // Calculate Total Order Value (all valid orders excluding cancelled)
+      const orderValueAgg = await Order.aggregate([
         { $match: { shopId, orderStatus: { $ne: 'cancelled' } } },
-        { $group: { _id: null, totalRevenue: { $sum: '$grandTotal' } } },
+        { $group: { _id: null, totalOrderValue: { $sum: '$grandTotal' } } },
       ]);
-      const totalRevenue = revenueAgg[0]?.totalRevenue || 0;
+      const totalOrderValue = orderValueAgg[0]?.totalOrderValue || 0;
 
-      // Best selling products from order snapshots
+      // Calculate Confirmed/Completed Sales (distinguishing from unconfirmed pending requests)
+      const confirmedSalesAgg = await Order.aggregate([
+        { $match: { shopId, orderStatus: { $in: ['confirmed', 'processing', 'shipped', 'delivered'] } } },
+        { $group: { _id: null, confirmedSales: { $sum: '$grandTotal' } } },
+      ]);
+      const confirmedSales = confirmedSalesAgg[0]?.confirmedSales || 0;
+
+      // Total unique customers count derived from orders
+      const uniqueCustomersAgg = await Order.aggregate([
+        { $match: { shopId } },
+        { $group: { _id: '$customerSnapshot.phone' } },
+        { $count: 'totalCustomers' },
+      ]);
+      const totalCustomers = uniqueCustomersAgg[0]?.totalCustomers || 0;
+
+      // Recent 5 Customers derived from orders
+      const recentCustomersAgg = await Order.aggregate([
+        { $match: { shopId } },
+        { $sort: { createdAt: -1 } },
+        {
+          $group: {
+            _id: '$customerSnapshot.phone',
+            name: { $first: '$customerSnapshot.name' },
+            phone: { $first: '$customerSnapshot.phone' },
+            businessName: { $first: '$customerSnapshot.businessName' },
+            lastOrderDate: { $first: '$createdAt' },
+            orderCount: { $sum: 1 },
+            totalSpent: { $sum: '$grandTotal' },
+          },
+        },
+        { $sort: { lastOrderDate: -1 } },
+        { $limit: 5 },
+      ]);
+
+      // Top selling products from order snapshots
       const topProductsAgg = await Order.aggregate([
         { $match: { shopId, orderStatus: { $ne: 'cancelled' } } },
         { $unwind: '$items' },
@@ -81,15 +128,23 @@ export class ShopAdminController {
           metrics: {
             totalProducts,
             activeProducts,
+            totalCategories,
             totalOrders,
             pendingOrders,
             confirmedOrders,
-            completedOrders,
+            processingOrders,
+            shippedOrders,
+            deliveredOrders,
+            completedOrders: deliveredOrders,
             cancelledOrders,
-            totalRevenue,
+            totalOrderValue,
+            confirmedSales,
+            totalCustomers,
           },
           recentOrders,
+          recentCustomers: recentCustomersAgg,
           topProducts: topProductsAgg,
+          shop,
         },
       });
     } catch (error: any) {
@@ -98,7 +153,7 @@ export class ShopAdminController {
   }
 
   /**
-   * Get shop settings
+   * Get shop profile and settings
    */
   public static async getShop(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
@@ -115,7 +170,7 @@ export class ShopAdminController {
   }
 
   /**
-   * Update shop settings
+   * Update shop profile and settings
    */
   public static async updateShop(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
@@ -126,18 +181,24 @@ export class ShopAdminController {
         return;
       }
 
-      // Fields permitted for shop admin edit
       const allowedFields = [
         'name',
+        'businessName',
         'description',
+        'ownerName',
+        'businessCategory',
+        'gstNumber',
         'logo',
         'banner',
         'contactPhone',
         'whatsappNumber',
+        'whatsappCheckoutEnabled',
         'email',
+        'website',
         'address',
         'businessHours',
         'socialLinks',
+        'branding',
         'accentColor',
         'currency',
         'currencySymbol',
@@ -145,7 +206,25 @@ export class ShopAdminController {
 
       allowedFields.forEach((field) => {
         if (req.body[field] !== undefined) {
-          (shop as any)[field] = req.body[field];
+          if (field === 'whatsappNumber' && req.body.whatsappNumber) {
+            shop.whatsappNumber = WhatsAppService.normalizePhoneNumber(req.body.whatsappNumber);
+          } else if (field === 'address' && typeof req.body.address === 'object') {
+            shop.address = {
+              ...shop.address,
+              ...req.body.address,
+              street: req.body.address.addressLine1 || req.body.address.street || shop.address?.street || '',
+            };
+          } else if (field === 'branding' && typeof req.body.branding === 'object') {
+            shop.branding = {
+              ...shop.branding,
+              ...req.body.branding,
+            };
+            if (req.body.branding.primaryColor) {
+              shop.accentColor = req.body.branding.primaryColor;
+            }
+          } else {
+            (shop as any)[field] = req.body[field];
+          }
         }
       });
 
@@ -511,18 +590,39 @@ export class ShopAdminController {
         filter.paymentStatus = req.query.paymentStatus;
       }
 
+      // Date filtering
+      if (req.query.startDate || req.query.endDate) {
+        filter.createdAt = {};
+        if (req.query.startDate) {
+          filter.createdAt.$gte = new Date(req.query.startDate as string);
+        }
+        if (req.query.endDate) {
+          const end = new Date(req.query.endDate as string);
+          end.setHours(23, 59, 59, 999);
+          filter.createdAt.$lte = end;
+        }
+      }
+
       if (req.query.search) {
         const search = (req.query.search as string).trim();
         filter.$or = [
           { orderNumber: { $regex: search, $options: 'i' } },
           { 'customerSnapshot.name': { $regex: search, $options: 'i' } },
           { 'customerSnapshot.phone': { $regex: search, $options: 'i' } },
+          { 'customerSnapshot.whatsapp': { $regex: search, $options: 'i' } },
+          { 'customerSnapshot.businessName': { $regex: search, $options: 'i' } },
+          { 'deliveryAddress.fullName': { $regex: search, $options: 'i' } },
+          { 'deliveryAddress.phone': { $regex: search, $options: 'i' } },
+          { 'deliveryAddress.city': { $regex: search, $options: 'i' } },
         ];
       }
 
-      const [orders, total] = await Promise.all([
+      const [orders, total, pendingCount, confirmedCount, deliveredCount] = await Promise.all([
         Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
         Order.countDocuments(filter),
+        Order.countDocuments({ shopId, orderStatus: 'pending' }),
+        Order.countDocuments({ shopId, orderStatus: 'confirmed' }),
+        Order.countDocuments({ shopId, orderStatus: 'delivered' }),
       ]);
 
       const totalPages = Math.ceil(total / limit);
@@ -531,6 +631,12 @@ export class ShopAdminController {
         success: true,
         data: {
           orders,
+          summary: {
+            totalOrders: total,
+            pendingOrders: pendingCount,
+            confirmedOrders: confirmedCount,
+            deliveredOrders: deliveredCount,
+          },
           pagination: {
             total,
             page,
@@ -558,7 +664,38 @@ export class ShopAdminController {
         return;
       }
 
-      res.json({ success: true, data: { order } });
+      const shop = await Shop.findById(shopId);
+
+      // Generate direct customer WhatsApp conversation URL
+      const customerRawPhone =
+        order.deliveryAddress.whatsapp ||
+        order.customerSnapshot.whatsapp ||
+        order.deliveryAddress.phone ||
+        order.customerSnapshot.phone ||
+        '';
+
+      let customerWhatsAppUrl = '';
+      if (customerRawPhone) {
+        const cleanCustPhone = WhatsAppService.normalizePhoneNumber(customerRawPhone);
+        const greeting = `Hello ${order.deliveryAddress.fullName || order.customerSnapshot.name}, this is ${shop?.name || 'our store'} regarding your order ${order.orderNumber}.`;
+        customerWhatsAppUrl = `https://wa.me/${cleanCustPhone}?text=${encodeURIComponent(greeting)}`;
+      }
+
+      res.json({
+        success: true,
+        data: {
+          order,
+          customerWhatsAppUrl,
+          shop: shop
+            ? {
+                _id: shop._id,
+                name: shop.name,
+                whatsappNumber: shop.whatsappNumber,
+                currencySymbol: shop.currencySymbol,
+              }
+            : undefined,
+        },
+      });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -709,6 +846,269 @@ export class ShopAdminController {
         message: 'Image uploaded successfully',
         data: { url: imageUrl },
       });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  /**
+   * Upload and set shop logo
+   */
+  public static async uploadShopLogo(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const shopId = ShopAdminController.getShopId(req);
+      if (!(req as any).file) {
+        res.status(400).json({ success: false, message: 'Please select an image file to upload as logo' });
+        return;
+      }
+      const file = (req as any).file;
+      const imageUrl = await UploadService.uploadImage(
+        file.buffer,
+        file.mimetype,
+        `wholesale_catalogue/${shopId}/branding`
+      );
+      const shop = await Shop.findByIdAndUpdate(shopId, { logo: imageUrl }, { new: true });
+      res.json({ success: true, message: 'Shop logo updated successfully', data: { logo: imageUrl, shop } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  /**
+   * Remove shop logo
+   */
+  public static async removeShopLogo(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const shopId = ShopAdminController.getShopId(req);
+      const shop = await Shop.findByIdAndUpdate(shopId, { logo: '' }, { new: true });
+      res.json({ success: true, message: 'Shop logo removed successfully', data: { shop } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  /**
+   * Update shop appearance and branding colors
+   */
+  public static async updateShopBranding(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const shopId = ShopAdminController.getShopId(req);
+      const { primaryColor, secondaryColor, accentColor, buttonColor, backgroundColor, textColor } = req.body;
+      const branding = {
+        primaryColor: primaryColor || '#2563eb',
+        secondaryColor: secondaryColor || '#475569',
+        accentColor: accentColor || primaryColor || '#3b82f6',
+        buttonColor: buttonColor || primaryColor || '#2563eb',
+        backgroundColor: backgroundColor || '#ffffff',
+        textColor: textColor || '#0f172a',
+      };
+      const shop = await Shop.findByIdAndUpdate(
+        shopId,
+        { branding, accentColor: branding.primaryColor },
+        { new: true }
+      );
+      res.json({ success: true, message: 'Shop appearance and branding updated successfully', data: { shop } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  /**
+   * Update WhatsApp order settings
+   */
+  public static async updateWhatsAppSettings(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const shopId = ShopAdminController.getShopId(req);
+      const { whatsappNumber, whatsappCheckoutEnabled } = req.body;
+      const updateData: any = {};
+      if (whatsappNumber) {
+        updateData.whatsappNumber = WhatsAppService.normalizePhoneNumber(whatsappNumber);
+      }
+      if (whatsappCheckoutEnabled !== undefined) {
+        updateData.whatsappCheckoutEnabled = Boolean(whatsappCheckoutEnabled);
+      }
+      const shop = await Shop.findByIdAndUpdate(shopId, updateData, { new: true });
+      res.json({ success: true, message: 'WhatsApp order settings updated successfully', data: { shop } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  /**
+   * Customers directory derived from shop orders
+   */
+  public static async getCustomers(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const shopId = ShopAdminController.getShopId(req);
+      const search = (req.query.search as string || '').trim();
+
+      const pipeline: any[] = [
+        { $match: { shopId } },
+        { $sort: { createdAt: -1 } },
+        {
+          $group: {
+            _id: '$customerSnapshot.phone',
+            name: { $first: '$customerSnapshot.name' },
+            phone: { $first: '$customerSnapshot.phone' },
+            whatsapp: { $first: '$customerSnapshot.whatsapp' },
+            businessName: { $first: '$customerSnapshot.businessName' },
+            city: { $first: '$deliveryAddress.city' },
+            state: { $first: '$deliveryAddress.state' },
+            orderCount: { $sum: 1 },
+            totalSpent: { $sum: '$grandTotal' },
+            lastOrderDate: { $max: '$createdAt' },
+            lastOrderNumber: { $first: '$orderNumber' },
+            lastOrderStatus: { $first: '$orderStatus' },
+          },
+        },
+      ];
+
+      if (search) {
+        pipeline.push({
+          $match: {
+            $or: [
+              { name: { $regex: search, $options: 'i' } },
+              { phone: { $regex: search, $options: 'i' } },
+              { businessName: { $regex: search, $options: 'i' } },
+              { city: { $regex: search, $options: 'i' } },
+            ],
+          },
+        });
+      }
+
+      pipeline.push({ $sort: { lastOrderDate: -1 } });
+
+      const customers = await Order.aggregate(pipeline);
+
+      res.json({
+        success: true,
+        data: {
+          customers,
+          total: customers.length,
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  /**
+   * Customer details and purchase history
+   */
+  public static async getCustomerDetails(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const shopId = ShopAdminController.getShopId(req);
+      const phone = req.params.phone;
+
+      const orders = await Order.find({
+        shopId,
+        $or: [
+          { 'customerSnapshot.phone': phone },
+          { 'deliveryAddress.phone': phone },
+        ],
+      }).sort({ createdAt: -1 });
+
+      if (!orders || orders.length === 0) {
+        res.status(404).json({ success: false, message: 'Customer not found' });
+        return;
+      }
+
+      const latestOrder = orders[0];
+      const customer = {
+        name: latestOrder.customerSnapshot.name,
+        phone: latestOrder.customerSnapshot.phone,
+        whatsapp: latestOrder.customerSnapshot.whatsapp || latestOrder.customerSnapshot.phone,
+        businessName: latestOrder.customerSnapshot.businessName,
+        totalOrders: orders.length,
+        totalSpent: orders.reduce((sum, o) => sum + (o.grandTotal || 0), 0),
+        firstOrderDate: orders[orders.length - 1].createdAt,
+        lastOrderDate: latestOrder.createdAt,
+      };
+
+      const addressMap = new Map();
+      orders.forEach((o) => {
+        const addr = o.deliveryAddress;
+        if (addr) {
+          const key = `${addr.addressLine1 || addr.street}_${addr.city}_${addr.postalCode}`;
+          if (!addressMap.has(key)) {
+            addressMap.set(key, addr);
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        data: {
+          customer,
+          addresses: Array.from(addressMap.values()),
+          orders: orders.map((o) => ({
+            _id: o._id,
+            orderNumber: o.orderNumber,
+            createdAt: o.createdAt,
+            grandTotal: o.grandTotal,
+            orderStatus: o.orderStatus,
+            paymentStatus: o.paymentStatus,
+            itemsCount: o.items.length,
+            orderSource: o.orderSource,
+          })),
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  /**
+   * Account profile & credentials
+   */
+  public static async getAccountProfile(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const user = await User.findById(req.user!.userId).select('name email phone role assignedShopIds lastLogin');
+      if (!user) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+      }
+      res.json({ success: true, data: { user } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  public static async updateAccountProfile(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { name, phone } = req.body;
+      const user = await User.findById(req.user!.userId);
+      if (!user) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+      }
+      if (name) user.name = name.trim();
+      if (phone !== undefined) user.phone = phone.trim();
+      await user.save();
+      res.json({ success: true, message: 'Profile updated successfully', data: { user } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  public static async changeAccountPassword(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      const user = await User.findById(req.user!.userId);
+      if (!user) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+      }
+      const isMatch = await user.comparePassword(currentPassword);
+      if (!isMatch) {
+        res.status(400).json({ success: false, message: 'Current password is not correct' });
+        return;
+      }
+      const salt = await bcrypt.genSalt(10);
+      user.passwordHash = await bcrypt.hash(newPassword, salt);
+      user.tokenVersion = (user.tokenVersion || 0) + 1;
+      await user.save();
+      res.json({ success: true, message: 'Password updated successfully' });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }

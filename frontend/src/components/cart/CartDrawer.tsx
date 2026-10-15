@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight, AlertTriangle } from 'lucide-react';
 import { useCart } from '../../contexts/CartContext';
@@ -8,6 +8,17 @@ export const CartDrawer: React.FC = () => {
   const { cart, currentShopSlug, isCartOpen, setIsCartOpen, updateQuantity, removeFromCart, clearCart } =
     useCart();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isCartOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isCartOpen]);
 
   if (!isCartOpen) return null;
 

@@ -33,19 +33,24 @@ export interface IOrder extends Document {
   _id: Types.ObjectId;
   orderNumber: string;
   shopId: Types.ObjectId;
-  customerId: Types.ObjectId;
+  customerId?: Types.ObjectId;
   customerSnapshot: {
     name: string;
-    email: string;
+    email?: string;
     phone: string;
+    whatsapp?: string;
     businessName?: string;
   };
   deliveryAddress: {
     fullName: string;
     phone: string;
+    whatsapp?: string;
     businessName?: string;
-    street: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    street?: string;
     city: string;
+    district?: string;
     state: string;
     postalCode: string;
     country: string;
@@ -59,6 +64,9 @@ export interface IOrder extends Document {
   currencySymbol: string;
   orderStatus: OrderStatus;
   paymentStatus: PaymentStatus;
+  orderSource?: 'guest_whatsapp' | 'registered_customer';
+  whatsappStatus?: 'pending_customer_send' | 'sent' | 'unconfirmed';
+  guestAccessToken?: string;
   paymentNotes?: string;
   customerNotes?: string;
   internalNotes?: string;
@@ -134,24 +142,29 @@ const OrderSchema = new Schema<IOrder>(
     customerId: {
       type: Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: false,
       index: true,
     },
     customerSnapshot: {
-      name: { type: String, required: true },
-      email: { type: String, required: true },
-      phone: { type: String, required: true },
-      businessName: { type: String },
+      name: { type: String, required: true, trim: true },
+      email: { type: String, trim: true, lowercase: true },
+      phone: { type: String, required: true, trim: true },
+      whatsapp: { type: String, trim: true },
+      businessName: { type: String, trim: true },
     },
     deliveryAddress: {
-      fullName: { type: String, required: true },
-      phone: { type: String, required: true },
-      businessName: { type: String },
-      street: { type: String, required: true },
-      city: { type: String, required: true },
-      state: { type: String, required: true },
-      postalCode: { type: String, required: true },
-      country: { type: String, default: 'India' },
+      fullName: { type: String, required: true, trim: true },
+      phone: { type: String, required: true, trim: true },
+      whatsapp: { type: String, trim: true },
+      businessName: { type: String, trim: true },
+      addressLine1: { type: String, trim: true },
+      addressLine2: { type: String, trim: true },
+      street: { type: String, trim: true },
+      city: { type: String, required: true, trim: true },
+      district: { type: String, trim: true },
+      state: { type: String, required: true, trim: true },
+      postalCode: { type: String, required: true, trim: true },
+      country: { type: String, default: 'India', trim: true },
     },
     items: {
       type: [OrderItemSnapshotSchema],
@@ -175,6 +188,22 @@ const OrderSchema = new Schema<IOrder>(
       enum: ['unpaid', 'partially_paid', 'paid', 'refunded'],
       default: 'unpaid',
       index: true,
+    },
+    orderSource: {
+      type: String,
+      enum: ['guest_whatsapp', 'registered_customer'],
+      default: 'guest_whatsapp',
+      index: true,
+    },
+    whatsappStatus: {
+      type: String,
+      enum: ['pending_customer_send', 'sent', 'unconfirmed'],
+      default: 'pending_customer_send',
+    },
+    guestAccessToken: {
+      type: String,
+      index: true,
+      sparse: true,
     },
     paymentNotes: { type: String },
     customerNotes: { type: String },

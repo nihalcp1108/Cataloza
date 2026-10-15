@@ -287,6 +287,7 @@ export class SubscriptionController {
         currency: currency || 'INR',
         paymentDate: new Date(),
         paymentMethod: paymentMethod || 'bank_transfer',
+        paymentStatus: 'paid',
         referenceNumber: referenceNumber || `REF-${Date.now()}`,
         notes: notes || '',
         recordedBy: req.user?.userId ? new Types.ObjectId(req.user.userId) : undefined,
@@ -301,6 +302,7 @@ export class SubscriptionController {
       }
 
       // If subscription was expired/past_due, reactivate it upon recorded payment
+      subscription.paymentStatus = 'paid';
       if (['expired', 'past_due'].includes(subscription.status)) {
         subscription.status = 'active';
       }

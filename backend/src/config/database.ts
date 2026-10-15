@@ -27,3 +27,14 @@ mongoose.connection.on('disconnected', () => {
 mongoose.connection.on('error', (err) => {
   console.error('[Database] MongoDB runtime error:', err);
 });
+
+export const disconnectDatabase = async (): Promise<void> => {
+  try {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.connection.close(false);
+      console.log('[Database] MongoDB connection closed gracefully.');
+    }
+  } catch (err) {
+    console.warn('[Database] Error closing MongoDB connection:', err);
+  }
+};

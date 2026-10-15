@@ -167,11 +167,11 @@ npm install
 **Backend (`backend/.env`):**
 ```env
 NODE_ENV=development
-PORT=5000
+PORT=5001
 MONGODB_URI=mongodb://localhost:27017/wholesale_catalogue
 FRONTEND_URL=http://localhost:5173
 PUBLIC_APP_URL=http://localhost:5173
-API_BASE_URL=http://localhost:5000/api/v1
+API_BASE_URL=http://localhost:5001/api/v1
 JWT_ACCESS_SECRET=dev_jwt_access_secret_wholesale_platform_123
 JWT_ACCESS_EXPIRES_IN=1h
 JWT_REFRESH_SECRET=dev_jwt_refresh_secret_wholesale_platform_456

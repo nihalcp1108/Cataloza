@@ -37,6 +37,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchCurrentUser = async () => {
+    const token = localStorage.getItem('wf_access_token');
+    if (!token) {
+      setUser(null);
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const res = await api.get('/auth/me');
       if (res.data?.success && res.data?.data?.user) {

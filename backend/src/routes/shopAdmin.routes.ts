@@ -10,7 +10,12 @@ import {
   updatePaymentStatusSchema,
   addOrderNoteSchema,
 } from '../validators/order.validator';
-import { updateShopSchema } from '../validators/shop.validator';
+import {
+  updateShopSchema,
+  updateBrandingSchema,
+  updateAccountSchema,
+  changePasswordSchema,
+} from '../validators/shop.validator';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -34,9 +39,13 @@ router.use(requireShopAccess);
 // Dashboard
 router.get('/dashboard', ShopAdminController.getDashboard);
 
-// Shop settings
+// Shop Profile & settings
 router.get('/shop', ShopAdminController.getShop);
 router.patch('/shop', validate(updateShopSchema), ShopAdminController.updateShop);
+router.post('/shop/logo', upload.single('logo'), ShopAdminController.uploadShopLogo);
+router.delete('/shop/logo', ShopAdminController.removeShopLogo);
+router.patch('/shop/branding', validate(updateBrandingSchema), ShopAdminController.updateShopBranding);
+router.patch('/shop/whatsapp', ShopAdminController.updateWhatsAppSettings);
 
 // Shop Subscription & Usage
 router.get('/subscription', async (req: any, res: any) => {
@@ -74,6 +83,15 @@ router.patch('/orders/:id/status', validate(updateOrderStatusSchema), ShopAdminC
 router.patch('/orders/:id/payment', validate(updatePaymentStatusSchema), ShopAdminController.updatePaymentStatus);
 router.post('/orders/:id/notes', validate(addOrderNoteSchema), ShopAdminController.addOrderNote);
 router.get('/orders/:id/invoice', ShopAdminController.downloadInvoice);
+
+// Customers
+router.get('/customers', ShopAdminController.getCustomers);
+router.get('/customers/:phone', ShopAdminController.getCustomerDetails);
+
+// Admin Account
+router.get('/account', ShopAdminController.getAccountProfile);
+router.patch('/account', validate(updateAccountSchema), ShopAdminController.updateAccountProfile);
+router.post('/account/change-password', validate(changePasswordSchema), ShopAdminController.changeAccountPassword);
 
 // Media Upload
 router.post('/upload', upload.single('image'), ShopAdminController.uploadMedia);

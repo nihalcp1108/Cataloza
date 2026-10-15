@@ -119,14 +119,28 @@ export class PublicController {
         isActive: true,
       };
 
+      const andClauses: any[] = [];
+
       // Search query
       const search = (req.query.search as string)?.trim();
       if (search) {
-        filter.$or = [
-          { name: { $regex: search, $options: 'i' } },
-          { sku: { $regex: search, $options: 'i' } },
-          { description: { $regex: search, $options: 'i' } },
-        ];
+        andClauses.push({
+          $or: [
+            { name: { $regex: search, $options: 'i' } },
+            { sku: { $regex: search, $options: 'i' } },
+            { description: { $regex: search, $options: 'i' } },
+          ],
+        });
+      }
+
+      // In-stock availability filter
+      if (req.query.inStock === 'true') {
+        andClauses.push({
+          $or: [
+            { trackInventory: false },
+            { stockQuantity: { $gt: 0 } },
+          ],
+        });
       }
 
       // Category filter
@@ -146,12 +160,8 @@ export class PublicController {
         if (req.query.maxPrice) filter.price.$lte = parseFloat(req.query.maxPrice as string);
       }
 
-      // In-stock availability filter
-      if (req.query.inStock === 'true') {
-        filter.$or = [
-          { trackInventory: false },
-          { stockQuantity: { $gt: 0 } },
-        ];
+      if (andClauses.length > 0) {
+        filter.$and = andClauses;
       }
 
       // Sort

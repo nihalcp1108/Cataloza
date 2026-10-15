@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Types } from 'mongoose';
 import { Order, IOrder, IOrderItemSnapshot } from '../models/Order';
 import { Product } from '../models/Product';
@@ -7,22 +8,28 @@ import { WhatsAppService, IWhatsAppHandoff } from './whatsapp.service';
 
 export interface ICheckoutInput {
   shopId: string;
-  customerId: string;
+  customerId?: string;
+  sessionId?: string;
   customerSnapshot: {
     name: string;
-    email: string;
+    email?: string;
     phone: string;
+    whatsapp?: string;
     businessName?: string;
   };
   deliveryAddress: {
     fullName: string;
     phone: string;
+    whatsapp?: string;
     businessName?: string;
-    street: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    street?: string;
     city: string;
+    district?: string;
     state: string;
     postalCode: string;
-    country: string;
+    country?: string;
   };
   items: Array<{
     productId: string;
@@ -35,13 +42,16 @@ export interface ICheckoutInput {
 
 export class OrderService {
   /**
-   * Generates a sequential/random human-readable order identifier
-   * Format: WC-YYYY-XXXXXX
+   * Generates a clean human-readable order identifier
+   * Format: [SHOP_PREFIX]-[RANDOM_6_DIGITS] (e.g. CLX-120482)
    */
-  public static generateOrderNumber(): string {
-    const year = new Date().getFullYear();
+  public static generateOrderNumber(shopName?: string): string {
+    const cleanPrefix = (shopName || 'CAT')
+      .replace(/[^A-Za-z0-9]/g, '')
+      .substring(0, 3)
+      .toUpperCase() || 'CAT';
     const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-    return `WC-${year}-${randomSuffix}`;
+    return `${cleanPrefix}-${randomSuffix}`;
   }
 
   /**
@@ -51,8 +61,8 @@ export class OrderService {
     input: ICheckoutInput
   ): Promise<{ order: IOrder; handoff: IWhatsAppHandoff }> {
     // 1. Idempotency safeguard: Check if order with this key already exists
-    if (input.idempotencyKey) {
-      const existing = await Order.findOne({ idempotencyKey: input.idempotencyKey });
+    if (input.idempotencyKey && input.idempotencyKey.trim()) {
+      const existing = await Order.findOne({ idempotencyKey: input.idempotencyKey.trim() });
       if (existing) {
         const shop = await Shop.findById(existing.shopId);
         if (shop) {
@@ -72,11 +82,13 @@ export class OrderService {
       throw new Error('Your cart is empty. Please add items to proceed.');
     }
 
-    // 3. Process every line item against real database products
+    // 3. Process every line item against real database products (Authoritative prices)
     const orderItems: IOrderItemSnapshot[] = [];
     let subtotal = 0;
 
     for (const item of input.items) {
+      if (!item.productId) continue;
+
       const product = await Product.findOne({
         _id: new Types.ObjectId(item.productId),
         shopId: shop._id, // Guarantee product belongs to THIS shop!
@@ -90,8 +102,10 @@ export class OrderService {
         throw new Error(`Product "${product.name}" is no longer available`);
       }
 
+      const orderQty = Math.max(1, item.quantity);
+
       // Validate Minimum Order Quantity
-      if (item.quantity < (product.minimumOrderQuantity || 1)) {
+      if (orderQty < (product.minimumOrderQuantity || 1)) {
         throw new Error(
           `Minimum order quantity for "${product.name}" is ${product.minimumOrderQuantity} ${product.unit}`
         );
@@ -114,9 +128,9 @@ export class OrderService {
           ? selectedVariant.stockQuantity ?? 0
           : product.stockQuantity;
 
-        if (availableStock < item.quantity) {
+        if (availableStock < orderQty) {
           throw new Error(
-            `Insufficient stock for "${product.name}". Available: ${availableStock}, Requested: ${item.quantity}`
+            `Insufficient stock for "${product.name}". Available: ${availableStock}, Requested: ${orderQty}`
           );
         }
 
@@ -124,17 +138,17 @@ export class OrderService {
         if (selectedVariant) {
           await Product.updateOne(
             { _id: product._id, 'variants.name': item.variantName },
-            { $inc: { 'variants.$.stockQuantity': -item.quantity } }
+            { $inc: { 'variants.$.stockQuantity': -orderQty } }
           );
         } else {
           await Product.updateOne(
             { _id: product._id },
-            { $inc: { stockQuantity: -item.quantity } }
+            { $inc: { stockQuantity: -orderQty } }
           );
         }
       }
 
-      const lineTotal = unitPrice * item.quantity;
+      const lineTotal = unitPrice * orderQty;
       subtotal += lineTotal;
 
       orderItems.push({
@@ -142,7 +156,7 @@ export class OrderService {
         name: product.name,
         sku: selectedVariant?.sku || product.sku,
         variantName: item.variantName,
-        quantity: item.quantity,
+        quantity: orderQty,
         unit: product.unit || 'piece',
         unitPrice,
         lineTotal,
@@ -150,20 +164,54 @@ export class OrderService {
       });
     }
 
+    if (orderItems.length === 0) {
+      throw new Error('No valid items found in order.');
+    }
+
     // 4. Server-controlled delivery fee and discounts
-    const deliveryCharge = 0; // Wholesale default: free or agreed via WhatsApp
+    const deliveryCharge = 0; // Wholesale default: agreed via WhatsApp
     const discount = 0;
     const grandTotal = subtotal + deliveryCharge - discount;
 
-    const orderNumber = this.generateOrderNumber();
+    const orderNumber = this.generateOrderNumber(shop.name);
+    const guestAccessToken = crypto.randomBytes(24).toString('hex');
 
-    // 5. Create immutable order record
+    // Build standard delivery address supporting both addressLine1 and street
+    const rawDelivery = input.deliveryAddress;
+    const streetResolved = rawDelivery.street || rawDelivery.addressLine1 || '';
+    const addressLine1Resolved = rawDelivery.addressLine1 || rawDelivery.street || '';
+
+    const normalizedDeliveryAddress = {
+      fullName: rawDelivery.fullName.trim(),
+      phone: rawDelivery.phone.trim(),
+      whatsapp: rawDelivery.whatsapp ? rawDelivery.whatsapp.trim() : undefined,
+      businessName: rawDelivery.businessName ? rawDelivery.businessName.trim() : undefined,
+      addressLine1: addressLine1Resolved.trim(),
+      addressLine2: rawDelivery.addressLine2 ? rawDelivery.addressLine2.trim() : undefined,
+      street: streetResolved.trim(),
+      city: rawDelivery.city.trim(),
+      district: rawDelivery.district ? rawDelivery.district.trim() : undefined,
+      state: rawDelivery.state.trim(),
+      postalCode: rawDelivery.postalCode.trim(),
+      country: rawDelivery.country ? rawDelivery.country.trim() : 'India',
+    };
+
+    const isGuest = !input.customerId;
+    const customerObjId = input.customerId ? new Types.ObjectId(input.customerId) : undefined;
+
+    // 5. Create immutable order record in MongoDB
     const order = await Order.create({
       orderNumber,
       shopId: shop._id,
-      customerId: new Types.ObjectId(input.customerId),
-      customerSnapshot: input.customerSnapshot,
-      deliveryAddress: input.deliveryAddress,
+      customerId: customerObjId,
+      customerSnapshot: {
+        name: input.customerSnapshot.name.trim(),
+        email: input.customerSnapshot.email ? input.customerSnapshot.email.trim() : undefined,
+        phone: input.customerSnapshot.phone.trim(),
+        whatsapp: input.customerSnapshot.whatsapp ? input.customerSnapshot.whatsapp.trim() : undefined,
+        businessName: input.customerSnapshot.businessName ? input.customerSnapshot.businessName.trim() : undefined,
+      },
+      deliveryAddress: normalizedDeliveryAddress,
       items: orderItems,
       subtotal,
       discount,
@@ -173,28 +221,33 @@ export class OrderService {
       currencySymbol: shop.currencySymbol || '₹',
       orderStatus: 'pending',
       paymentStatus: 'unpaid',
-      customerNotes: input.customerNotes,
+      orderSource: isGuest ? 'guest_whatsapp' : 'registered_customer',
+      whatsappStatus: 'pending_customer_send',
+      guestAccessToken,
+      customerNotes: input.customerNotes ? input.customerNotes.trim() : undefined,
       statusHistory: [
         {
           status: 'pending',
-          changedBy: new Types.ObjectId(input.customerId),
-          note: 'Order placed by customer via WholesaleFlow',
+          changedBy: customerObjId,
+          note: isGuest ? 'Guest order placed via WhatsApp checkout' : 'Order placed by registered customer',
           timestamp: new Date(),
         },
       ],
       paymentHistory: [],
       whatsappHandoffInitiated: true,
       whatsappHandoffTimestamp: new Date(),
-      idempotencyKey: input.idempotencyKey,
+      idempotencyKey: input.idempotencyKey ? input.idempotencyKey.trim() : undefined,
     });
 
-    // 6. Clear customer's cart for this shop
-    await Cart.deleteOne({
-      customerId: new Types.ObjectId(input.customerId),
-      shopId: shop._id,
-    });
+    // 6. Clear customer/session cart in MongoDB
+    if (customerObjId) {
+      await Cart.deleteOne({ customerId: customerObjId, shopId: shop._id });
+    }
+    if (input.sessionId) {
+      await Cart.deleteOne({ sessionId: input.sessionId, shopId: shop._id });
+    }
 
-    // 7. Generate WhatsApp handoff payload
+    // 7. Generate authoritative WhatsApp handoff payload
     const handoff = WhatsAppService.generateHandoff(order, shop);
 
     return { order, handoff };

@@ -27,8 +27,15 @@ router.patch('/shops/:id/reactivate', SuperAdminController.reactivateShop);
 router.get('/admins', SuperAdminController.getShopAdmins);
 router.post('/admins', SuperAdminController.createShopAdmin);
 router.patch('/admins/:id', SuperAdminController.updateShopAdmin);
+router.post('/admins/:id/reset-password', SuperAdminController.resetShopAdminPassword);
 router.post('/admins/:id/resend-invitation', SuperAdminController.resendAdminInvitation);
 router.post('/admins/:id/revoke-sessions', SuperAdminController.revokeAdminSessions);
+
+// Subscriptions & Revenue Management
+router.post('/subscriptions/renew', SuperAdminController.renewSubscription);
+router.post('/subscriptions/payments', SuperAdminController.recordSubscriptionPayment);
+router.get('/subscriptions/payments', SuperAdminController.getSubscriptionPayments);
+router.get('/reports/revenue', SuperAdminController.getRevenueReports);
 
 // Platform Orders Overview
 router.get('/orders', SuperAdminController.getPlatformOrders);

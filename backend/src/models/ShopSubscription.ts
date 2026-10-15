@@ -8,14 +8,22 @@ export type SubscriptionStatus =
   | 'cancelled'
   | 'suspended';
 
+export type PaymentRecordStatus = 'paid' | 'pending' | 'failed' | 'refunded';
+
 export interface ISubscriptionPayment {
+  _id?: Types.ObjectId;
   amount: number;
   currency: string;
   paymentDate: Date;
   paymentMethod: 'bank_transfer' | 'upi' | 'cash' | 'card' | 'cheque' | 'other';
+  paymentStatus: PaymentRecordStatus;
   referenceNumber: string;
+  planName?: string;
+  discount?: number;
   notes?: string;
   recordedBy?: Types.ObjectId;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export interface ISubscriptionStatusChange {
@@ -26,6 +34,18 @@ export interface ISubscriptionStatusChange {
   changedBy?: Types.ObjectId;
 }
 
+export interface IPlanSnapshot {
+  name: string;
+  code: string;
+  price: number;
+  currency: string;
+  billingInterval: string;
+  maxProducts: number;
+  maxCategories: number;
+  maxAdmins: number;
+  features: string[];
+}
+
 export interface IShopSubscription extends Document {
   _id: Types.ObjectId;
   shopId: Types.ObjectId;
@@ -33,8 +53,12 @@ export interface IShopSubscription extends Document {
   status: SubscriptionStatus;
   startDate: Date;
   endDate: Date;
+  renewalDate?: Date;
   trialEndsAt?: Date;
   autoRenew: boolean;
+  billingAmount?: number;
+  paymentStatus?: 'paid' | 'pending' | 'overdue';
+  planSnapshot?: IPlanSnapshot;
   payments: ISubscriptionPayment[];
   statusHistory: ISubscriptionStatusChange[];
   notes?: string;
@@ -52,7 +76,15 @@ const SubscriptionPaymentSchema = new Schema<ISubscriptionPayment>(
       enum: ['bank_transfer', 'upi', 'cash', 'card', 'cheque', 'other'],
       default: 'bank_transfer',
     },
-    referenceNumber: { type: String, trim: true },
+    paymentStatus: {
+      type: String,
+      enum: ['paid', 'pending', 'failed', 'refunded'],
+      default: 'paid',
+      index: true,
+    },
+    referenceNumber: { type: String, trim: true, default: '' },
+    planName: { type: String, trim: true },
+    discount: { type: Number, default: 0, min: 0 },
     notes: { type: String, trim: true },
     recordedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },
@@ -66,6 +98,21 @@ const SubscriptionStatusChangeSchema = new Schema<ISubscriptionStatusChange>(
     reason: { type: String, trim: true },
     changedAt: { type: Date, default: Date.now },
     changedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  },
+  { _id: false }
+);
+
+const PlanSnapshotSchema = new Schema<IPlanSnapshot>(
+  {
+    name: { type: String, default: '' },
+    code: { type: String, default: '' },
+    price: { type: Number, default: 0 },
+    currency: { type: String, default: 'INR' },
+    billingInterval: { type: String, default: 'monthly' },
+    maxProducts: { type: Number, default: 50 },
+    maxCategories: { type: Number, default: 10 },
+    maxAdmins: { type: Number, default: 1 },
+    features: { type: [String], default: [] },
   },
   { _id: false }
 );
@@ -99,12 +146,29 @@ const ShopSubscriptionSchema = new Schema<IShopSubscription>(
       required: true,
       index: true,
     },
+    renewalDate: {
+      type: Date,
+    },
     trialEndsAt: {
       type: Date,
     },
     autoRenew: {
       type: Boolean,
       default: false,
+    },
+    billingAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ['paid', 'pending', 'overdue'],
+      default: 'paid',
+      index: true,
+    },
+    planSnapshot: {
+      type: PlanSnapshotSchema,
     },
     payments: {
       type: [SubscriptionPaymentSchema],
@@ -125,6 +189,7 @@ const ShopSubscriptionSchema = new Schema<IShopSubscription>(
 );
 
 ShopSubscriptionSchema.index({ shopId: 1, status: 1 });
+ShopSubscriptionSchema.index({ 'payments.paymentDate': -1 });
 
 export const ShopSubscription = mongoose.model<IShopSubscription>(
   'ShopSubscription',

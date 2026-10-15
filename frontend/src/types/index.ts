@@ -27,25 +27,52 @@ export interface IUser {
 }
 
 export interface IShopAddress {
+  addressLine1?: string;
+  addressLine2?: string;
   street?: string;
   city?: string;
+  district?: string;
   state?: string;
   postalCode?: string;
   country?: string;
 }
 
+export interface ISocialLinks {
+  facebook?: string;
+  instagram?: string;
+  twitter?: string;
+  website?: string;
+}
+
+export interface IShopBranding {
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  buttonColor: string;
+  backgroundColor: string;
+  textColor: string;
+}
+
 export interface IShop {
   _id: string;
   name: string;
+  businessName?: string;
   slug: string;
   description?: string;
+  ownerName?: string;
+  businessCategory?: string;
+  gstNumber?: string;
   logo?: string;
   banner?: string;
   contactPhone?: string;
   whatsappNumber: string;
+  whatsappCheckoutEnabled?: boolean;
   email?: string;
+  website?: string;
   address?: IShopAddress;
   businessHours?: string;
+  socialLinks?: ISocialLinks;
+  branding?: IShopBranding;
   accentColor?: string;
   currency?: string;
   currencySymbol?: string;
@@ -56,6 +83,45 @@ export interface IShop {
   publicUrl?: string;
   subscriptionId?: any;
   productFormTemplateId?: any;
+}
+
+export interface IShopCustomer {
+  _id: string;
+  name: string;
+  phone: string;
+  whatsapp?: string;
+  businessName?: string;
+  city?: string;
+  state?: string;
+  orderCount: number;
+  totalSpent: number;
+  lastOrderDate: string;
+  lastOrderNumber?: string;
+  lastOrderStatus?: string;
+}
+
+export interface ICustomerDetail {
+  customer: {
+    name: string;
+    phone: string;
+    whatsapp?: string;
+    businessName?: string;
+    totalOrders: number;
+    totalSpent: number;
+    firstOrderDate: string;
+    lastOrderDate: string;
+  };
+  addresses: IShopAddress[];
+  orders: Array<{
+    _id: string;
+    orderNumber: string;
+    createdAt: string;
+    grandTotal: number;
+    orderStatus: string;
+    paymentStatus: string;
+    itemsCount: number;
+    orderSource: string;
+  }>;
 }
 
 export interface ICategory {
@@ -173,19 +239,24 @@ export interface IOrder {
   _id: string;
   orderNumber: string;
   shopId: any;
-  customerId: any;
+  customerId?: any;
   customerSnapshot: {
     name: string;
-    email: string;
+    email?: string;
     phone: string;
+    whatsapp?: string;
     businessName?: string;
   };
   deliveryAddress: {
     fullName: string;
     phone: string;
+    whatsapp?: string;
     businessName?: string;
-    street: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    street?: string;
     city: string;
+    district?: string;
     state: string;
     postalCode: string;
     country: string;
@@ -199,6 +270,9 @@ export interface IOrder {
   currencySymbol: string;
   orderStatus: OrderStatus;
   paymentStatus: PaymentStatus;
+  orderSource?: 'guest_whatsapp' | 'registered_customer';
+  whatsappStatus?: 'pending_customer_send' | 'sent' | 'unconfirmed';
+  guestAccessToken?: string;
   customerNotes?: string;
   internalNotes?: string;
   statusHistory: IOrderStatusHistory[];
@@ -326,11 +400,18 @@ export interface ISubscriptionPlan {
 
 export interface ISubscriptionPayment {
   _id?: string;
+  subscriptionId?: string;
+  shopId?: string;
+  shopName?: string;
+  shopSlug?: string;
+  planName?: string;
   amount: number;
   currency: string;
   paymentDate: string;
   paymentMethod: string;
+  paymentStatus?: 'paid' | 'pending' | 'failed' | 'refunded';
   referenceNumber: string;
+  discount?: number;
   notes?: string;
   recordedBy?: any;
 }
@@ -342,8 +423,12 @@ export interface IShopSubscription {
   status: 'trialing' | 'active' | 'past_due' | 'expired' | 'cancelled' | 'suspended';
   startDate: string;
   endDate: string;
+  renewalDate?: string;
   trialEndsAt?: string;
   autoRenew: boolean;
+  billingAmount?: number;
+  paymentStatus?: 'paid' | 'pending' | 'overdue';
+  planSnapshot?: any;
   payments: ISubscriptionPayment[];
   notes?: string;
   createdAt?: string;

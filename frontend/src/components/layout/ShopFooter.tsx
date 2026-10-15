@@ -70,7 +70,7 @@ export const ShopFooter: React.FC<ShopFooterProps> = ({ shop }) => {
           <p>© {new Date().getFullYear()} {shop.name}. All wholesale rights reserved.</p>
           <p className="flex items-center gap-1.5">
             <span>Powered by</span>
-            <span className="font-semibold text-slate-300">WholesaleFlow Multi-Tenant Platform</span>
+            <span className="font-semibold text-slate-300">Cataloza Wholesale Platform</span>
           </p>
         </div>
       </div>
