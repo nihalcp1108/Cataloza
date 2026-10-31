@@ -11,6 +11,7 @@ export interface IUser extends Document {
   role: UserRole;
   assignedShopIds: Types.ObjectId[];
   isActive: boolean;
+  isVerified: boolean;
   mustChangePassword?: boolean;
   lastLogin?: Date;
   passwordResetToken?: string;
@@ -63,6 +64,11 @@ const UserSchema = new Schema<IUser>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    isVerified: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
     mustChangePassword: {
       type: Boolean,

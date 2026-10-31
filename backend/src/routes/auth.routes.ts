@@ -20,11 +20,13 @@ const router = Router();
 // Standard customer and admin authentication
 router.post('/register', authLimiter, validate(registerSchema), AuthController.register);
 router.post('/login', authLimiter, validate(loginSchema), AuthController.login);
+router.post('/verify-otp', authLimiter, validate(verifyOtpSchema), AuthController.verifyOtp);
+router.post('/resend-otp', authLimiter, validate(resendOtpSchema), AuthController.resendOtp);
 router.post('/logout', AuthController.logout);
 router.get('/me', authenticate, AuthController.getMe);
 router.post('/refresh', AuthController.refreshToken);
 
-// Super Admin 2-Step OTP Authentication
+// Super Admin 2-Step OTP Authentication (also supported on standard /verify-otp & /resend-otp)
 router.post(
   '/super-admin/login',
   authLimiter,

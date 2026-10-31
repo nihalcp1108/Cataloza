@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import { config } from '../config';
 import authRoutes from './auth.routes';
 import publicRoutes from './public.routes';
@@ -14,8 +15,12 @@ const router = Router();
 
 // Health check
 router.get('/health', (_req, res) => {
-  res.json({
-    status: 'healthy',
+  const isDbConnected = mongoose.connection.readyState === 1;
+  const statusCode = isDbConnected ? 200 : 503;
+
+  res.status(statusCode).json({
+    status: isDbConnected ? 'healthy' : 'unhealthy',
+    database: isDbConnected ? 'connected' : 'disconnected',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     smtpConfigured: Boolean(config.smtp.host && config.smtp.user && config.smtp.pass),

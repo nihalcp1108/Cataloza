@@ -1,14 +1,28 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
+// Load .env from backend directory or fallback to current working directory
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config();
+
+const rawMongoUri = (
+  process.env.MONGODB_URI ||
+  process.env.MONGO_URI ||
+  process.env.DATABASE_URL ||
+  'mongodb://localhost:27017/wholesale_catalogue'
+)
+  .trim()
+  .replace(/^["']|["']$/g, '')
+  .replace(/^MONGO(?:DB)?_URI=/, '')
+  .replace(/^DATABASE_URL=/, '')
+  .trim();
 
 export const config = {
   env: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
   port: parseInt(process.env.PORT || '5001', 10),
 
-  mongoUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/wholesale_catalogue',
+  mongoUri: rawMongoUri,
 
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
   publicAppUrl: process.env.PUBLIC_APP_URL || 'http://localhost:5173',
@@ -38,9 +52,9 @@ export const config = {
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.SMTP_PORT || '587', 10),
     secure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
-    user: process.env.SMTP_USER || '',
-    pass: process.env.SMTP_PASS || '',
-    from: process.env.EMAIL_FROM || `Cateloge OTP <${process.env.SMTP_USER || 'cpnihal35@gmail.com'}>`,
+    user: (process.env.SMTP_USER || '').trim(),
+    pass: (process.env.SMTP_PASS || '').replace(/\s+/g, '').trim(),
+    from: (process.env.EMAIL_FROM || `Cataloza OTP <${process.env.SMTP_USER || 'catalozaofficial@gmail.com'}>`).replace(/^["']|["']$/g, '').trim(),
   },
 
   superAdmin: {
@@ -81,4 +95,20 @@ export const config = {
     'shop',
     'shops'
   ],
+};
+
+export const validateConfig = (): { valid: boolean; errors: string[] } => {
+  const errors: string[] = [];
+  if (!config.mongoUri) {
+    errors.push('MongoDB connection URI is missing. Set MONGODB_URI or MONGO_URI in .env');
+  } else if (!config.mongoUri.startsWith('mongodb://') && !config.mongoUri.startsWith('mongodb+srv://')) {
+    errors.push(`Invalid MongoDB URI scheme. Must start with 'mongodb://' or 'mongodb+srv://'.`);
+  }
+  if (!config.jwt.accessSecret) {
+    errors.push('JWT_ACCESS_SECRET is required.');
+  }
+  if (!config.jwt.refreshSecret) {
+    errors.push('JWT_REFRESH_SECRET is required.');
+  }
+  return { valid: errors.length === 0, errors };
 };

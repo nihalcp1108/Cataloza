@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
@@ -12,24 +13,183 @@ import { config } from '../config';
 
 const AUTHORIZED_SUPER_ADMIN_EMAIL = 'cpnihal35@gmail.com';
 
+const isDatabaseUnavailable = (): boolean => mongoose.connection.readyState !== 1;
+
+const isDatabaseError = (error: any): boolean => {
+  return (
+    mongoose.connection.readyState !== 1 ||
+    error?.name === 'MongooseError' ||
+    error?.name === 'MongoServerSelectionError' ||
+    error?.name === 'MongoNetworkError' ||
+    Boolean(error?.message?.includes('buffering timed out')) ||
+    Boolean(error?.message?.includes('ECONNREFUSED'))
+  );
+};
+
 export class AuthController {
+  /**
+   * User Registration with mandatory OTP verification
+   */
   public static async register(req: Request, res: Response): Promise<void> {
     try {
-      const { user, accessToken, refreshToken } = await AuthService.registerCustomer(req.body);
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      const { name, email, phone, password } = req.body;
+      const normalizedEmail = (email || '').toLowerCase().trim();
+
+      if (!normalizedEmail || !password || !name) {
+        res.status(400).json({
+          success: false,
+          message: 'Name, email, and password are required',
+        });
+        return;
+      }
+
+      const { challengeId } = await AuthService.initiateRegistration({
+        name,
+        email: normalizedEmail,
+        phone,
+        password,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+
+      res.status(200).json({
+        success: true,
+        requiresOtp: true,
+        message: `A 6-digit verification code has been dispatched to ${normalizedEmail}. Please enter it to complete registration.`,
+        data: {
+          challengeId,
+          email: normalizedEmail,
+          expiresInSeconds: 600,
+        },
+      });
+    } catch (error: any) {
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Registration failed',
+      });
+    }
+  }
+
+  /**
+   * Unified OTP verification endpoint (registration & login)
+   */
+  public static async verifyOtp(req: Request, res: Response): Promise<void> {
+    try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      const { challengeId, otp } = req.body;
+      if (!challengeId || !otp) {
+        res.status(400).json({
+          success: false,
+          message: 'Challenge ID and 6-digit OTP code are required',
+        });
+        return;
+      }
+
+      const { user, accessToken, refreshToken } = await AuthService.verifyOtp(challengeId, otp);
       AuthService.setAuthCookies(res, accessToken, refreshToken);
 
-      res.status(201).json({
+      if (user.role === 'super_admin') {
+        await AuditService.logAction({
+          actorId: user._id.toString(),
+          actorRole: user.role,
+          action: 'SUPER_ADMIN_2FA_LOGIN_SUCCESS',
+          targetEntity: 'User',
+          targetId: user._id.toString(),
+        });
+      }
+
+      res.status(200).json({
         success: true,
-        message: 'Account registered successfully',
+        message: 'Account verified successfully',
         data: {
           user,
           accessToken,
         },
       });
     } catch (error: any) {
-      res.status(400).json({
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      const statusCode = error.message?.includes('Maximum verification attempts') ? 429 : 400;
+      res.status(statusCode).json({
         success: false,
-        message: error.message || 'Registration failed',
+        message: error.message || 'Verification failed',
+      });
+    }
+  }
+
+  /**
+   * Resend OTP endpoint with rate limiting
+   */
+  public static async resendOtp(req: Request, res: Response): Promise<void> {
+    try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      const { challengeId } = req.body;
+      if (!challengeId) {
+        res.status(400).json({
+          success: false,
+          message: 'Challenge ID is required',
+        });
+        return;
+      }
+
+      const result = await AuthService.resendOtp(challengeId);
+
+      res.status(200).json({
+        success: true,
+        message: `A fresh verification code has been dispatched to ${result.email}`,
+        data: {
+          expiresInSeconds: result.expiresInSeconds,
+        },
+      });
+    } catch (error: any) {
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      const statusCode = error.message?.includes('wait') || error.message?.includes('Maximum') ? 429 : 400;
+      res.status(statusCode).json({
+        success: false,
+        message: error.message || 'Failed to resend verification code',
       });
     }
   }
@@ -40,14 +200,30 @@ export class AuthController {
    */
   public static async login(req: Request, res: Response): Promise<void> {
     try {
-      const email = (req.body.email || '').toLowerCase().trim();
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      const email = (req.body?.email || '').toLowerCase().trim();
+      const password = req.body?.password;
+
+      if (!email || !password) {
+        res.status(400).json({
+          success: false,
+          message: 'Email and password are required',
+        });
+        return;
+      }
 
       // If logging in as the authorized Super Admin, enforce two-step verification
       if (email === AUTHORIZED_SUPER_ADMIN_EMAIL) {
         return AuthController.superAdminLogin(req, res);
       }
 
-      const { password } = req.body;
       const { user, accessToken, refreshToken } = await AuthService.loginUser(email, password);
 
       // Prevent non-authorized accounts from possessing or using super_admin role
@@ -59,9 +235,51 @@ export class AuthController {
         return;
       }
 
+      // Check if user is unverified
+      if (!user.isVerified && user.role !== 'super_admin') {
+        const otpCode = crypto.randomInt(100000, 1000000).toString();
+        const otpHash = await bcrypt.hash(otpCode, 10);
+        const challengeId = crypto.randomBytes(32).toString('hex');
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+        try {
+          await EmailService.sendVerificationOtp(user.email, user.name, otpCode);
+        } catch (mailErr: any) {
+          console.error(`[Auth] Failed to dispatch login verification OTP to ${user.email}:`, mailErr.message);
+        }
+
+        await OtpChallenge.create({
+          challengeId,
+          userId: user._id,
+          email: user.email,
+          otpHash,
+          purpose: 'registration',
+          expiresAt,
+          attempts: 0,
+          maxAttempts: 5,
+          resendCount: 1,
+          lastSentAt: new Date(),
+          used: false,
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'],
+        });
+
+        res.status(200).json({
+          success: true,
+          requiresOtp: true,
+          message: 'Your email address is not yet verified. A 6-digit verification code has been dispatched to your email.',
+          data: {
+            challengeId,
+            email: user.email,
+            expiresInSeconds: 600,
+          },
+        });
+        return;
+      }
+
       AuthService.setAuthCookies(res, accessToken, refreshToken);
 
-      res.json({
+      res.status(200).json({
         success: true,
         message: 'Login successful',
         data: {
@@ -70,6 +288,14 @@ export class AuthController {
         },
       });
     } catch (error: any) {
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
       res.status(401).json({
         success: false,
         message: error.message || 'Invalid credentials',
@@ -79,14 +305,28 @@ export class AuthController {
 
   /**
    * Step 1: Super Admin Login & OTP Generation
-   * Fixed authorized email: cpnihal35@gmail.com
    */
   public static async superAdminLogin(req: Request, res: Response): Promise<void> {
     try {
-      const email = (req.body.email || '').toLowerCase().trim();
-      const password = req.body.password;
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
 
-      // 1. Strict email validation: Only cpnihal35@gmail.com is permitted
+      const email = (req.body?.email || '').toLowerCase().trim();
+      const password = req.body?.password;
+
+      if (!email || !password) {
+        res.status(400).json({
+          success: false,
+          message: 'Email and password are required',
+        });
+        return;
+      }
+
       if (email !== AUTHORIZED_SUPER_ADMIN_EMAIL) {
         res.status(401).json({
           success: false,
@@ -95,7 +335,6 @@ export class AuthController {
         return;
       }
 
-      // 2. Fetch authoritative user from MongoDB
       let user = await User.findOne({ email: AUTHORIZED_SUPER_ADMIN_EMAIL });
       if (!user && config.superAdmin.password) {
         try {
@@ -114,20 +353,18 @@ export class AuthController {
         return;
       }
 
-      // 3. Ensure super_admin role for authorized account
       if (user.role !== 'super_admin') {
         user.role = 'super_admin';
         user.isActive = true;
+        user.isVerified = true;
         await user.save();
       }
 
-      // 4. Confirm account is active
       if (!user.isActive) {
         user.isActive = true;
         await user.save();
       }
 
-      // 5. Verify password hash strictly against stored bcrypt hash (no bypasses)
       const isMatch = await user.comparePassword(password);
       if (!isMatch) {
         res.status(401).json({
@@ -137,7 +374,6 @@ export class AuthController {
         return;
       }
 
-      // 6. Rate Limiting: Max 5 OTP sends per 15 minutes per account
       const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
       const recentOtpCount = await OtpChallenge.countDocuments({
         userId: user._id,
@@ -152,23 +388,18 @@ export class AuthController {
         return;
       }
 
-      // 7. Invalidate all older outstanding challenges for this user
       await OtpChallenge.updateMany({ userId: user._id, used: false }, { used: true });
 
-      // 8. Generate cryptographically secure 6-digit OTP
       const otpCode = crypto.randomInt(100000, 1000000).toString();
       const salt = await bcrypt.genSalt(10);
       const otpHash = await bcrypt.hash(otpCode, salt);
 
-      // 9. Generate opaque challenge ID
       const challengeId = crypto.randomBytes(32).toString('hex');
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-      // 10. Send OTP exclusively to cpnihal35@gmail.com
       try {
         await EmailService.sendSuperAdminOtp(AUTHORIZED_SUPER_ADMIN_EMAIL, otpCode);
       } catch (deliveryError: any) {
-        // Sanitize error log: Never log OTP or secrets
         console.error('[Auth] Failed to dispatch Super Admin OTP email:', deliveryError.message);
         res.status(502).json({
           success: false,
@@ -177,12 +408,12 @@ export class AuthController {
         return;
       }
 
-      // 11. Store challenge record only after email delivery was accepted
       await OtpChallenge.create({
         challengeId,
         userId: user._id,
         email: AUTHORIZED_SUPER_ADMIN_EMAIL,
         otpHash,
+        purpose: 'super_admin_2fa',
         expiresAt,
         attempts: 0,
         maxAttempts: 5,
@@ -193,7 +424,6 @@ export class AuthController {
         userAgent: req.headers['user-agent'],
       });
 
-      // Audit event
       await AuditService.logAction({
         actorId: user._id.toString(),
         actorRole: user.role,
@@ -203,216 +433,42 @@ export class AuthController {
         metadata: { recipient: AUTHORIZED_SUPER_ADMIN_EMAIL },
       });
 
-      // Return challenge ID (never expose OTP)
-      res.json({
+      res.status(200).json({
         success: true,
         requiresOtp: true,
         message: `A 6-digit verification code has been sent to ${AUTHORIZED_SUPER_ADMIN_EMAIL}`,
         data: {
           challengeId,
           email: AUTHORIZED_SUPER_ADMIN_EMAIL,
-          expiresInSeconds: 300,
+          expiresInSeconds: 600,
         },
       });
     } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      console.error('[Auth] Super Admin login error:', error.message);
+      res.status(500).json({ success: false, message: error.message || 'Internal server error' });
     }
   }
 
   /**
-   * Step 2: Super Admin OTP Verification
+   * Super Admin OTP Verification (delegates to verifyOtp)
    */
   public static async superAdminVerifyOtp(req: Request, res: Response): Promise<void> {
-    try {
-      const { challengeId, otp } = req.body;
-
-      if (!challengeId || !otp) {
-        res.status(400).json({ success: false, message: 'Challenge ID and 6-digit OTP code are required' });
-        return;
-      }
-
-      // 1. Locate challenge
-      const challenge = await OtpChallenge.findOne({ challengeId, used: false });
-      if (!challenge) {
-        res.status(400).json({
-          success: false,
-          message: 'Invalid or expired verification session. Please sign in again.',
-        });
-        return;
-      }
-
-      // 2. Check expiration (5 minutes)
-      if (challenge.expiresAt.getTime() < Date.now()) {
-        challenge.used = true;
-        await challenge.save();
-        res.status(400).json({
-          success: false,
-          message: 'Verification code has expired. Please sign in again.',
-        });
-        return;
-      }
-
-      // 3. Check attempt limit (max 5)
-      if (challenge.attempts >= challenge.maxAttempts) {
-        challenge.used = true;
-        await challenge.save();
-        res.status(429).json({
-          success: false,
-          message: 'Maximum verification attempts exceeded. Please initiate a new sign-in.',
-        });
-        return;
-      }
-
-      // 4. Increment attempt counter atomically
-      challenge.attempts += 1;
-      await challenge.save();
-
-      // 5. Verify associated Super Admin account
-      const user = await User.findById(challenge.userId);
-      if (
-        !user ||
-        user.role !== 'super_admin' ||
-        !user.isActive ||
-        user.email !== AUTHORIZED_SUPER_ADMIN_EMAIL
-      ) {
-        challenge.used = true;
-        await challenge.save();
-        res.status(403).json({
-          success: false,
-          message: 'Unauthorized account state or role mismatch.',
-        });
-        return;
-      }
-
-      // 6. Verify cryptographic hash of OTP
-      const isMatch = await bcrypt.compare(otp.trim(), challenge.otpHash);
-      if (!isMatch) {
-        const remainingAttempts = challenge.maxAttempts - challenge.attempts;
-        if (remainingAttempts <= 0) {
-          challenge.used = true;
-          await challenge.save();
-          res.status(400).json({
-            success: false,
-            message: 'Invalid verification code. Maximum attempts reached. Please sign in again.',
-          });
-          return;
-        }
-
-        res.status(400).json({
-          success: false,
-          message: `Invalid verification code. ${remainingAttempts} attempt${remainingAttempts !== 1 ? 's' : ''} remaining.`,
-        });
-        return;
-      }
-
-      // 7. Successful verification: Consume challenge
-      challenge.used = true;
-      challenge.consumedAt = new Date();
-      await challenge.save();
-
-      // 8. Update user login time
-      user.lastLogin = new Date();
-      await user.save();
-
-      // 9. Issue authoritative JWT tokens & secure HttpOnly cookies
-      const accessToken = AuthService.generateAccessToken(user);
-      const refreshToken = AuthService.generateRefreshToken(user);
-      AuthService.setAuthCookies(res, accessToken, refreshToken);
-
-      // Audit event
-      await AuditService.logAction({
-        actorId: user._id.toString(),
-        actorRole: user.role,
-        action: 'SUPER_ADMIN_2FA_LOGIN_SUCCESS',
-        targetEntity: 'User',
-        targetId: user._id.toString(),
-      });
-
-      res.json({
-        success: true,
-        message: 'Super Admin authentication successful',
-        data: {
-          user,
-          accessToken,
-        },
-      });
-    } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
-    }
+    return AuthController.verifyOtp(req, res);
   }
 
   /**
-   * Resend Super Admin OTP
+   * Super Admin OTP Resend (delegates to resendOtp)
    */
   public static async superAdminResendOtp(req: Request, res: Response): Promise<void> {
-    try {
-      const { challengeId } = req.body;
-      if (!challengeId) {
-        res.status(400).json({ success: false, message: 'Challenge ID is required' });
-        return;
-      }
-
-      const challenge = await OtpChallenge.findOne({ challengeId, used: false });
-      if (!challenge) {
-        res.status(400).json({ success: false, message: 'Invalid or expired session. Please sign in again.' });
-        return;
-      }
-
-      // 1. Resend cooldown: at least 60 seconds
-      const elapsedMs = Date.now() - new Date(challenge.lastSentAt).getTime();
-      const cooldownMs = 60 * 1000;
-      if (elapsedMs < cooldownMs) {
-        const remainingSec = Math.ceil((cooldownMs - elapsedMs) / 1000);
-        res.status(429).json({
-          success: false,
-          message: `Please wait ${remainingSec} second${remainingSec !== 1 ? 's' : ''} before requesting a new code.`,
-        });
-        return;
-      }
-
-      // 2. Maximum 3 sends per challenge
-      if (challenge.resendCount >= 3) {
-        res.status(429).json({
-          success: false,
-          message: 'Maximum code resend limit reached for this session. Please sign in again.',
-        });
-        return;
-      }
-
-      // 3. Generate new OTP
-      const newOtpCode = crypto.randomInt(100000, 1000000).toString();
-      const salt = await bcrypt.genSalt(10);
-      const newOtpHash = await bcrypt.hash(newOtpCode, salt);
-
-      // 4. Dispatch email
-      try {
-        await EmailService.sendSuperAdminOtp(AUTHORIZED_SUPER_ADMIN_EMAIL, newOtpCode);
-      } catch (err: any) {
-        res.status(502).json({
-          success: false,
-          message: `Failed to resend email: ${err.message}`,
-        });
-        return;
-      }
-
-      // 5. Update challenge
-      challenge.otpHash = newOtpHash;
-      challenge.expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-      challenge.attempts = 0; // reset attempts for fresh code
-      challenge.resendCount += 1;
-      challenge.lastSentAt = new Date();
-      await challenge.save();
-
-      res.json({
-        success: true,
-        message: `A fresh verification code has been dispatched to ${AUTHORIZED_SUPER_ADMIN_EMAIL}`,
-        data: {
-          expiresInSeconds: 300,
-        },
-      });
-    } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
-    }
+    return AuthController.resendOtp(req, res);
   }
 
   /**
@@ -420,6 +476,14 @@ export class AuthController {
    */
   public static async setupAdminPassword(req: Request, res: Response): Promise<void> {
     try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
       const { token, password } = req.body;
       if (!token || !password) {
         res.status(400).json({ success: false, message: 'Invitation token and new password are required' });
@@ -445,6 +509,7 @@ export class AuthController {
       user.invitationExpires = undefined;
       user.mustChangePassword = false;
       user.isActive = true;
+      user.isVerified = true;
       user.lastLogin = new Date();
       await user.save();
 
@@ -452,7 +517,7 @@ export class AuthController {
       const refreshToken = AuthService.generateRefreshToken(user);
       AuthService.setAuthCookies(res, accessToken, refreshToken);
 
-      res.json({
+      res.status(200).json({
         success: true,
         message: 'Password successfully configured. Welcome to your Shop Admin portal.',
         data: {
@@ -461,13 +526,20 @@ export class AuthController {
         },
       });
     } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+      res.status(500).json({ success: false, message: error.message || 'Internal server error' });
     }
   }
 
   public static async logout(_req: Request, res: Response): Promise<void> {
     AuthService.clearAuthCookies(res);
-    res.json({
+    res.status(200).json({
       success: true,
       message: 'Logged out successfully',
     });
@@ -475,6 +547,14 @@ export class AuthController {
 
   public static async getMe(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
       if (!req.user) {
         res.status(401).json({ success: false, message: 'Not authenticated' });
         return;
@@ -488,17 +568,32 @@ export class AuthController {
         return;
       }
 
-      res.json({
+      res.status(200).json({
         success: true,
         data: { user },
       });
     } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+      res.status(500).json({ success: false, message: error.message || 'Internal server error' });
     }
   }
 
   public static async refreshToken(req: Request, res: Response): Promise<void> {
     try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
       const refreshToken = req.cookies?.refresh_token || req.body?.refreshToken;
       if (!refreshToken) {
         res.status(401).json({ success: false, message: 'Refresh token required' });
@@ -516,7 +611,7 @@ export class AuthController {
       const newRefreshToken = AuthService.generateRefreshToken(user);
       AuthService.setAuthCookies(res, newAccessToken, newRefreshToken);
 
-      res.json({
+      res.status(200).json({
         success: true,
         data: {
           accessToken: newAccessToken,
@@ -529,7 +624,15 @@ export class AuthController {
 
   public static async forgotPassword(req: Request, res: Response): Promise<void> {
     try {
-      const email = (req.body.email || '').toLowerCase().trim();
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      const email = (req.body?.email || '').toLowerCase().trim();
       if (!email) {
         res.status(400).json({ success: false, message: 'Email address is required' });
         return;
@@ -548,17 +651,32 @@ export class AuthController {
         return;
       }
 
-      res.json({
+      res.status(200).json({
         success: true,
         message: 'If an account is associated with this email address, a password reset link has been dispatched to your inbox.',
       });
     } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+      res.status(500).json({ success: false, message: error.message || 'Internal server error' });
     }
   }
 
   public static async resetPassword(req: Request, res: Response): Promise<void> {
     try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
       const { token, password, confirmPassword } = req.body;
       if (!token) {
         res.status(400).json({ success: false, message: 'Reset token is required' });
@@ -587,17 +705,32 @@ export class AuthController {
         return;
       }
 
-      res.json({
+      res.status(200).json({
         success: true,
         message: 'Password has been reset successfully. Please sign in with your new password.',
       });
     } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+      res.status(500).json({ success: false, message: error.message || 'Internal server error' });
     }
   }
 
   public static async changePassword(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
       const { currentPassword, newPassword, confirmPassword } = req.body;
       if (!currentPassword || !newPassword) {
         res.status(400).json({ success: false, message: 'Current password and new password are required' });
@@ -632,26 +765,37 @@ export class AuthController {
       user.tokenVersion = (user.tokenVersion || 0) + 1;
       await user.save();
 
-      // Issue refreshed tokens for current active session
       const accessToken = AuthService.generateAccessToken(user);
       const refreshToken = AuthService.generateRefreshToken(user);
       AuthService.setAuthCookies(res, accessToken, refreshToken);
 
-      res.json({
+      res.status(200).json({
         success: true,
         message: 'Password updated successfully across all sessions.',
         data: { accessToken },
       });
     } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+      res.status(500).json({ success: false, message: error.message || 'Internal server error' });
     }
   }
 
-  /**
-   * Protected administrative endpoint to repair or re-bootstrap Super Admin
-   */
   public static async triggerBootstrap(req: Request, res: Response): Promise<void> {
     try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
       const secret = req.headers['x-bootstrap-secret'] || req.body?.secret || req.query?.secret;
       if (secret !== config.superAdmin.bootstrapSecret) {
         res.status(403).json({ success: false, message: 'Unauthorized bootstrap request' });
@@ -661,17 +805,32 @@ export class AuthController {
       const forceReset = req.body?.forceReset === true || req.query?.forceReset === 'true';
       const result = await AuthService.bootstrapSuperAdmin({ forceReset });
 
-      res.json({
+      res.status(200).json({
         success: true,
         data: result,
       });
     } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+      res.status(500).json({ success: false, message: error.message || 'Internal server error' });
     }
   }
 
   public static async forceChangeInitialPassword(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
       const { currentPassword, newPassword, confirmPassword } = req.body;
       if (!currentPassword || !newPassword) {
         res.status(400).json({ success: false, message: 'Current and new password are required' });
@@ -703,13 +862,20 @@ export class AuthController {
       user.mustChangePassword = false;
       await user.save();
 
-      res.json({
+      res.status(200).json({
         success: true,
         message: 'Password successfully changed. You now have full access to your account.',
         data: { user },
       });
     } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+      res.status(500).json({ success: false, message: error.message || 'Internal server error' });
     }
   }
 }

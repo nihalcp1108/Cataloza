@@ -5,6 +5,7 @@ export interface IOtpChallenge extends Document {
   userId: Types.ObjectId;
   email: string;
   otpHash: string;
+  purpose?: 'registration' | 'login_2fa' | 'super_admin_2fa' | 'password_reset';
   expiresAt: Date;
   attempts: number;
   maxAttempts: number;
@@ -42,6 +43,12 @@ const OtpChallengeSchema = new Schema<IOtpChallenge>(
     otpHash: {
       type: String,
       required: true,
+    },
+    purpose: {
+      type: String,
+      enum: ['registration', 'login_2fa', 'super_admin_2fa', 'password_reset'],
+      default: 'registration',
+      index: true,
     },
     expiresAt: {
       type: Date,

@@ -12,6 +12,20 @@ export const errorHandler = (
   res: Response,
   _next: NextFunction
 ): void => {
+  // Database connection or buffering error: return 503 Service Unavailable
+  if (
+    err.name === 'MongoServerSelectionError' ||
+    err.name === 'MongoNetworkError' ||
+    (err.name === 'MongooseError' && err.message?.includes('buffering timed out'))
+  ) {
+    console.error(`[Database Error] 503 Service Unavailable - ${err.message}`);
+    res.status(503).json({
+      success: false,
+      message: 'Database service is temporarily unavailable. Please try again shortly.',
+    });
+    return;
+  }
+
   const statusCode = err.statusCode || 500;
   const message = err.message || 'Internal server error occurred';
 

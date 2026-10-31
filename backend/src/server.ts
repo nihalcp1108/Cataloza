@@ -1,5 +1,5 @@
+import { config, validateConfig } from './config';
 import app from './app';
-import { config } from './config';
 import { connectDatabase, disconnectDatabase } from './config/database';
 import { AuthService } from './services/auth.service';
 import { EmailService } from './services/email.service';
@@ -14,7 +14,17 @@ let isShuttingDown = false;
 
 const startServer = async (): Promise<void> => {
   try {
-    // Phase 3: In local development, check if the configured port is already occupied
+    // 1. Validate required environment configuration
+    const configCheck = validateConfig();
+    if (!configCheck.valid) {
+      console.error('============================================================');
+      console.error('[Startup] ❌ Environment configuration validation failed:');
+      configCheck.errors.forEach((err) => console.error(`  - ${err}`));
+      console.error('============================================================');
+      process.exit(1);
+    }
+
+    // 2. In local development, check if the configured port is already occupied
     if (config.env !== 'production') {
       const probe = await probeCatalozaHealth(config.port, 1000);
       if (probe.isRunning && probe.isHealthy) {
@@ -55,10 +65,10 @@ const startServer = async (): Promise<void> => {
       }
     }
 
-    // Connect to MongoDB
+    // 3. Connect to MongoDB Atlas (must successfully connect before accepting requests)
     await connectDatabase();
 
-    // Validate required SMTP & administrative environment variables at startup
+    // 4. Validate recommended SMTP & administrative environment variables
     const envCheck = EmailService.validateEnvironment();
     if (!envCheck.valid) {
       console.warn(
@@ -70,7 +80,7 @@ const startServer = async (): Promise<void> => {
       );
     }
 
-    // Idempotent Super Admin initialization
+    // 5. Idempotent Super Admin initialization
     try {
       const bootstrapResult = await AuthService.bootstrapSuperAdmin({ forceReset: false });
       console.log(`[Security] ${bootstrapResult.message}`);
@@ -78,7 +88,7 @@ const startServer = async (): Promise<void> => {
       console.warn(`[Security] Super Admin bootstrap warning: ${bootstrapErr.message}`);
     }
 
-    // Start HTTP server
+    // 6. Start HTTP server and accept incoming API requests
     const server = app.listen(config.port, '0.0.0.0', () => {
       console.log('============================================================');
       console.log(`🚀 WholesaleFlow Server started on port ${config.port} (0.0.0.0)`);
@@ -127,8 +137,11 @@ const startServer = async (): Promise<void> => {
 
     process.once('SIGTERM', handleShutdown('SIGTERM'));
     process.once('SIGINT', handleShutdown('SIGINT'));
-  } catch (error) {
-    console.error('[Server] Critical startup error:', error);
+  } catch (error: any) {
+    console.error('============================================================');
+    console.error('[Server] ❌ Critical startup error: Cannot start backend server without database connectivity.');
+    console.error(`         ${error?.message || error}`);
+    console.error('============================================================');
     await disconnectDatabase();
     process.exit(1);
   }

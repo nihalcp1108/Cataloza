@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { Response } from 'express';
 import { config } from '../config';
 import { User, IUser } from '../models/User';
+import { OtpChallenge } from '../models/OtpChallenge';
 import { IUserPayload, UserRole } from '../types';
 import { EmailService } from './email.service';
 
@@ -68,6 +69,199 @@ export class AuthService {
     });
   }
 
+  /**
+   * Register customer with mandatory OTP email verification
+   */
+  public static async initiateRegistration(data: {
+    name: string;
+    email: string;
+    phone?: string;
+    password: string;
+    ip?: string;
+    userAgent?: string;
+  }): Promise<{ challengeId: string; user: IUser }> {
+    const normalizedEmail = data.email.toLowerCase().trim();
+
+    if (normalizedEmail === 'cpnihal35@gmail.com') {
+      throw new Error('This email address is reserved for platform administration and cannot be registered publicly.');
+    }
+
+    let user = await User.findOne({ email: normalizedEmail });
+    if (user && user.isVerified) {
+      throw new Error('An account with this email address already exists. Please log in.');
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(data.password, salt);
+
+    if (user && !user.isVerified) {
+      user.name = data.name.trim();
+      user.phone = data.phone ? data.phone.trim() : user.phone;
+      user.passwordHash = passwordHash;
+      user.isActive = true;
+      await user.save();
+    } else {
+      user = await User.create({
+        name: data.name.trim(),
+        email: normalizedEmail,
+        phone: data.phone ? data.phone.trim() : undefined,
+        passwordHash,
+        role: 'customer' as UserRole,
+        assignedShopIds: [],
+        isActive: true,
+        isVerified: false,
+      });
+    }
+
+    // Invalidate prior pending challenges for this user
+    await OtpChallenge.updateMany({ userId: user._id, used: false }, { used: true });
+
+    // Generate secure 6-digit OTP
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
+    const otpHash = await bcrypt.hash(otpCode, 10);
+    const challengeId = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Dispatch verification email to the user's registered email address
+    try {
+      await EmailService.sendVerificationOtp(normalizedEmail, user.name, otpCode);
+    } catch (deliveryError: any) {
+      console.error(`[Auth] Failed to dispatch registration OTP email to ${normalizedEmail}:`, deliveryError.message);
+      throw new Error(`Email delivery failed: ${deliveryError.message}. Please check SMTP configuration in backend/.env`);
+    }
+
+    // Store challenge only after email was accepted by SMTP provider
+    await OtpChallenge.create({
+      challengeId,
+      userId: user._id,
+      email: normalizedEmail,
+      otpHash,
+      purpose: 'registration',
+      expiresAt,
+      attempts: 0,
+      maxAttempts: 5,
+      resendCount: 1,
+      lastSentAt: new Date(),
+      used: false,
+      ipAddress: data.ip,
+      userAgent: data.userAgent,
+    });
+
+    return { challengeId, user };
+  }
+
+  /**
+   * General OTP verification for both registration and login
+   */
+  public static async verifyOtp(
+    challengeId: string,
+    otp: string
+  ): Promise<{ user: IUser; accessToken: string; refreshToken: string }> {
+    const challenge = await OtpChallenge.findOne({ challengeId, used: false });
+    if (!challenge) {
+      throw new Error('Invalid or expired verification session. Please request a new code.');
+    }
+
+    if (challenge.expiresAt.getTime() < Date.now()) {
+      challenge.used = true;
+      await challenge.save();
+      throw new Error('Verification code has expired. Please request a new code.');
+    }
+
+    if (challenge.attempts >= challenge.maxAttempts) {
+      challenge.used = true;
+      await challenge.save();
+      throw new Error('Maximum verification attempts exceeded. Please request a new code.');
+    }
+
+    challenge.attempts += 1;
+    await challenge.save();
+
+    const isMatch = await bcrypt.compare(otp.trim(), challenge.otpHash);
+    if (!isMatch) {
+      const remaining = challenge.maxAttempts - challenge.attempts;
+      if (remaining <= 0) {
+        challenge.used = true;
+        await challenge.save();
+        throw new Error('Invalid verification code. Maximum attempts reached. Please request a new code.');
+      }
+      throw new Error(`Invalid verification code. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`);
+    }
+
+    challenge.used = true;
+    challenge.consumedAt = new Date();
+    await challenge.save();
+
+    const user = await User.findById(challenge.userId);
+    if (!user) {
+      throw new Error('Associated user account was not found.');
+    }
+
+    user.isVerified = true;
+    user.isActive = true;
+    user.lastLogin = new Date();
+    await user.save();
+
+    const accessToken = this.generateAccessToken(user);
+    const refreshToken = this.generateRefreshToken(user);
+
+    return { user, accessToken, refreshToken };
+  }
+
+  /**
+   * General OTP resend handler with rate limiting
+   */
+  public static async resendOtp(
+    challengeId: string
+  ): Promise<{ email: string; expiresInSeconds: number }> {
+    const challenge = await OtpChallenge.findOne({ challengeId, used: false });
+    if (!challenge) {
+      throw new Error('Invalid or expired verification session. Please initiate a new sign-in or registration.');
+    }
+
+    // 60-second cooldown
+    const elapsedMs = Date.now() - new Date(challenge.lastSentAt).getTime();
+    const cooldownMs = 60 * 1000;
+    if (elapsedMs < cooldownMs) {
+      const remainingSec = Math.ceil((cooldownMs - elapsedMs) / 1000);
+      throw new Error(`Please wait ${remainingSec} second${remainingSec !== 1 ? 's' : ''} before requesting a new code.`);
+    }
+
+    if (challenge.resendCount >= 5) {
+      throw new Error('Maximum code resend limit reached for this session. Please initiate a new sign-in or registration.');
+    }
+
+    const user = await User.findById(challenge.userId);
+    const recipientName = user?.name || 'User';
+
+    const newOtpCode = crypto.randomInt(100000, 1000000).toString();
+    const salt = await bcrypt.genSalt(10);
+    const newOtpHash = await bcrypt.hash(newOtpCode, salt);
+
+    try {
+      if (challenge.purpose === 'super_admin_2fa') {
+        await EmailService.sendSuperAdminOtp(challenge.email, newOtpCode);
+      } else {
+        await EmailService.sendVerificationOtp(challenge.email, recipientName, newOtpCode);
+      }
+    } catch (err: any) {
+      console.error(`[Auth] Failed to resend verification OTP to ${challenge.email}:`, err.message);
+      throw new Error(`Email delivery failed: ${err.message}`);
+    }
+
+    challenge.otpHash = newOtpHash;
+    challenge.expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    challenge.attempts = 0;
+    challenge.resendCount += 1;
+    challenge.lastSentAt = new Date();
+    await challenge.save();
+
+    return { email: challenge.email, expiresInSeconds: 600 };
+  }
+
+  /**
+   * Direct programmatic customer registration (preserves backwards compatibility)
+   */
   public static async registerCustomer(data: {
     name: string;
     email: string;
@@ -81,24 +275,34 @@ export class AuthService {
     }
 
     const existingUser = await User.findOne({ email: normalizedEmail });
-    if (existingUser) {
+    if (existingUser && existingUser.isVerified) {
       throw new Error('An account with this email address already exists');
     }
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(data.password, salt);
 
-    // CRITICAL SECURITY RULE: Public customer registration NEVER assigns administrative role
-    const user = await User.create({
-      name: data.name.trim(),
-      email: normalizedEmail,
-      phone: data.phone.trim(),
-      passwordHash,
-      role: 'customer' as UserRole,
-      assignedShopIds: [],
-      isActive: true,
-      lastLogin: new Date(),
-    });
+    let user = existingUser;
+    if (user) {
+      user.name = data.name.trim();
+      user.phone = data.phone.trim();
+      user.passwordHash = passwordHash;
+      user.isVerified = true;
+      user.isActive = true;
+      await user.save();
+    } else {
+      user = await User.create({
+        name: data.name.trim(),
+        email: normalizedEmail,
+        phone: data.phone.trim(),
+        passwordHash,
+        role: 'customer' as UserRole,
+        assignedShopIds: [],
+        isActive: true,
+        isVerified: true,
+        lastLogin: new Date(),
+      });
+    }
 
     const accessToken = this.generateAccessToken(user);
     const refreshToken = this.generateRefreshToken(user);
@@ -178,19 +382,12 @@ export class AuthService {
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
     user.mustChangePassword = false;
-    // Invalidate existing sessions by incrementing tokenVersion
     user.tokenVersion = (user.tokenVersion || 0) + 1;
 
     await user.save();
     return true;
   }
 
-  /**
-   * Safe, idempotent Super Admin bootstrap and repair mechanism.
-   * If cpnihal35@gmail.com does NOT exist, creates the account with SUPER_ADMIN_INITIAL_PASSWORD.
-   * If cpnihal35@gmail.com exists and forceReset is false: DOES NOT overwrite password (preserves user changes).
-   * If cpnihal35@gmail.com exists and forceReset is true: explicitly repairs password hash with SUPER_ADMIN_INITIAL_PASSWORD.
-   */
   public static async bootstrapSuperAdmin(options?: { forceReset?: boolean }): Promise<{
     status: 'created' | 'repaired' | 'exists';
     email: string;
@@ -215,7 +412,6 @@ export class AuthService {
       );
     }
 
-    // Demote or deactivate any unauthorized accounts that falsely claimed super_admin role
     await User.updateMany(
       { role: 'super_admin', email: { $ne: email } },
       { $set: { role: 'shop_admin' } }
@@ -234,6 +430,7 @@ export class AuthService {
         role: 'super_admin',
         assignedShopIds: [],
         isActive: true,
+        isVerified: true,
         mustChangePassword: false,
         tokenVersion: 0,
       });
@@ -251,6 +448,7 @@ export class AuthService {
       superAdmin.passwordHash = await bcrypt.hash(initialPassword, salt);
       superAdmin.role = 'super_admin';
       superAdmin.isActive = true;
+      superAdmin.isVerified = true;
       superAdmin.tokenVersion = (superAdmin.tokenVersion || 0) + 1;
       await superAdmin.save();
 
@@ -262,7 +460,6 @@ export class AuthService {
       };
     }
 
-    // Idempotent preservation: account exists, ensure super_admin role & active status without touching password
     let updated = false;
     if (superAdmin.role !== 'super_admin') {
       superAdmin.role = 'super_admin';
@@ -270,6 +467,10 @@ export class AuthService {
     }
     if (!superAdmin.isActive) {
       superAdmin.isActive = true;
+      updated = true;
+    }
+    if (!superAdmin.isVerified) {
+      superAdmin.isVerified = true;
       updated = true;
     }
     if (updated) {

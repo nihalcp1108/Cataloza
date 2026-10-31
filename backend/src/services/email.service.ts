@@ -1,6 +1,7 @@
 import net from 'net';
 import tls from 'tls';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import { config } from '../config';
 
 export interface EmailOptions {
@@ -19,14 +20,6 @@ export interface SmtpDiagnosticResult {
   secure: boolean;
   authenticatedUser: string;
   missingVariables?: string[];
-}
-
-// Dynamically detect if nodemailer is available in node_modules
-let nodemailerModule: any = null;
-try {
-  nodemailerModule = require('nodemailer');
-} catch {
-  nodemailerModule = null;
 }
 
 export class EmailService {
@@ -50,7 +43,7 @@ export class EmailService {
   }
 
   /**
-   * Dispatches email using either Nodemailer (if available) or the built-in native TLS socket client.
+   * Dispatches email using Nodemailer with native TLS socket fallback.
    */
   private static async sendViaSmtp(options: EmailOptions): Promise<void> {
     const { host, port, secure, user, pass, from } = config.smtp;
@@ -58,49 +51,82 @@ export class EmailService {
     const sanitizedPass = (pass || '').replace(/\s+/g, '');
 
     if (!host || !sanitizedUser || !sanitizedPass) {
-      const missing = [];
+      const missing: string[] = [];
       if (!host) missing.push('SMTP_HOST');
       if (!sanitizedUser) missing.push('SMTP_USER');
       if (!sanitizedPass) missing.push('SMTP_PASS');
       throw new Error(`SMTP service is not configured. Missing environment variables: ${missing.join(', ')}`);
     }
 
-    // 1. If nodemailer is installed in the runtime environment, use it as primary
-    if (nodemailerModule) {
-      try {
-        const isSecurePort = secure || port === 465;
-        const transporter = nodemailerModule.createTransport({
-          host,
-          port,
-          secure: isSecurePort,
-          auth: {
-            user: sanitizedUser,
-            pass: sanitizedPass,
-          },
-          tls: {
-            rejectUnauthorized: false,
-          },
-        });
+    const isSecurePort = secure === true || port === 465;
 
-        // Ensure from contains sanitizedUser as the sender address
-        const formattedFrom = from.includes('@') ? from : `Cateloge OTP <${sanitizedUser}>`;
-
-        await transporter.sendMail({
-          from: formattedFrom,
-          to: options.to,
-          subject: options.subject,
-          text: options.text,
-          html: options.html,
-        });
-
-        return;
-      } catch (nodemailerErr: any) {
-        console.warn(`[EmailService] Nodemailer dispatch failed (${nodemailerErr.message}), falling back to native TLS socket engine.`);
+    // Requirement 10: Ensure sender address matches the authenticated Gmail account
+    // Format: "Cataloza OTP" <catalozaofficial@gmail.com>
+    let senderName = 'Cataloza OTP';
+    if (from) {
+      const nameMatch = from.match(/^["']?([^"'<]+)["']?/);
+      if (nameMatch && nameMatch[1].trim()) {
+        senderName = nameMatch[1].trim();
       }
     }
+    const formattedFrom = `"${senderName}" <${sanitizedUser}>`;
 
-    // 2. High-performance native Node.js SMTP engine (Port 465 direct SSL & Port 587 STARTTLS)
-    return EmailService.sendViaNativeSocket(options, sanitizedUser, sanitizedPass);
+    // 1. Primary: Nodemailer transport with STARTTLS on port 587
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: isSecurePort,
+        requireTLS: !isSecurePort, // Enforces STARTTLS on port 587
+        auth: {
+          user: sanitizedUser,
+          pass: sanitizedPass,
+        },
+        tls: {
+          rejectUnauthorized: false,
+          minVersion: 'TLSv1.2',
+        },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 20000,
+      });
+
+      const info = await transporter.sendMail({
+        from: formattedFrom,
+        to: options.to,
+        subject: options.subject,
+        text: options.text,
+        html: options.html,
+        envelope: {
+          from: sanitizedUser,
+          to: options.to,
+        },
+      });
+
+      console.log(`[EmailService] ✅ Verification email accepted by SMTP server for delivery to ${options.to} (MessageId: ${info.messageId})`);
+      return;
+    } catch (nodemailerErr: any) {
+      const code = nodemailerErr.code || 'UNKNOWN';
+      const response = nodemailerErr.response || '';
+      console.warn(`[EmailService] ⚠️ Nodemailer dispatch failed to ${options.to} [Code: ${code}]: ${nodemailerErr.message} ${response ? `(${response})` : ''}, falling back to native TLS socket engine.`);
+    }
+
+    // 2. Secondary: High-performance native Node.js SMTP socket fallback
+    try {
+      await EmailService.sendViaNativeSocket(options, sanitizedUser, sanitizedPass, formattedFrom);
+      console.log(`[EmailService] ✅ Verification email accepted by native SMTP socket engine for delivery to ${options.to}`);
+    } catch (nativeErr: any) {
+      console.error(`[EmailService] ❌ All email dispatch mechanisms failed for ${options.to}:`, nativeErr.message);
+      const errCode = (nativeErr as any).code || '';
+      if (errCode === 'EAUTH' || nativeErr.message?.includes('535')) {
+        throw new Error('SMTP authentication failed (535): Gmail App Password or username not accepted. Verify the 16-character Google App Password in backend/.env.');
+      } else if (errCode === 'ETIMEDOUT') {
+        throw new Error('SMTP connection timed out connecting to smtp.gmail.com:587. Check network access, firewall, or ISP port 587 blocking.');
+      } else if (errCode === 'ECONNECTION') {
+        throw new Error('SMTP connection failed. Unable to establish connection to smtp.gmail.com:587.');
+      }
+      throw new Error(`Unable to send verification email: ${nativeErr.message}`);
+    }
   }
 
   /**
@@ -110,9 +136,10 @@ export class EmailService {
   private static async sendViaNativeSocket(
     options: EmailOptions,
     sanitizedUser: string,
-    sanitizedPass: string
+    sanitizedPass: string,
+    formattedFrom: string
   ): Promise<void> {
-    const { host, port, secure, from } = config.smtp;
+    const { host, port, secure } = config.smtp;
     const isDirectTls = secure || port === 465;
 
     return new Promise((resolve, reject) => {
@@ -217,7 +244,6 @@ export class EmailService {
 
             currentSocket = tlsSocket;
 
-            // CRITICAL FIX: Wait for secureConnect event before sending the secondary EHLO
             tlsSocket.once('secureConnect', () => {
               step = 10;
               sendCommand('EHLO localhost');
@@ -246,10 +272,9 @@ export class EmailService {
             sendCommand('DATA');
           } else if (step === 8 && code === 354) {
             step = 9;
-            const boundary = `====_Cateloge_${crypto.randomBytes(16).toString('hex')}_====`;
-            const messageId = `<${Date.now()}.${crypto.randomBytes(8).toString('hex')}@cateloge.com>`;
+            const boundary = `====_Cataloza_${crypto.randomBytes(16).toString('hex')}_====`;
+            const messageId = `<${Date.now()}.${crypto.randomBytes(8).toString('hex')}@cataloza.com>`;
             const dateStr = new Date().toUTCString();
-            const formattedFrom = from.includes('@') ? from : `Cateloge OTP <${sanitizedUser}>`;
 
             const rawMessage = [
               `From: ${formattedFrom}`,
@@ -320,174 +345,182 @@ export class EmailService {
       };
     }
 
-    // Try Nodemailer verify if available
-    if (nodemailerModule) {
-      try {
-        const isSecurePort = secure || port === 465;
-        const transporter = nodemailerModule.createTransport({
-          host,
-          port,
-          secure: isSecurePort,
-          auth: {
-            user: sanitizedUser,
-            pass: sanitizedPass,
-          },
-          tls: {
-            rejectUnauthorized: false,
-          },
-        });
-
-        await transporter.verify();
-        return {
-          success: true,
-          message: `SMTP connection and authentication verified via Nodemailer (${host}:${port})`,
-          provider: 'nodemailer',
-          host,
-          port,
-          secure: isSecurePort,
-          authenticatedUser: sanitizedUser,
-        };
-      } catch (err: any) {
-        return {
-          success: false,
-          message: `Nodemailer verification failed: ${err.message}`,
-          provider: 'nodemailer',
-          host,
-          port,
-          secure: Boolean(secure),
-          authenticatedUser: sanitizedUser,
-        };
-      }
-    }
-
-    // Native Socket Authentication Verification (connect, EHLO, STARTTLS, AUTH LOGIN, check 235, QUIT)
-    return new Promise((resolve) => {
-      const isDirectTls = secure || port === 465;
-      let currentSocket: net.Socket | tls.TLSSocket;
-      let completed = false;
-
-      const finishDiag = (success: boolean, message: string) => {
-        if (completed) return;
-        completed = true;
-        clearTimeout(diagTimer);
-        try {
-          if (currentSocket) {
-            currentSocket.write('QUIT\r\n');
-            currentSocket.destroy();
-          }
-        } catch {}
-        resolve({
-          success,
-          message,
-          provider: isDirectTls ? 'native_direct_tls' : 'native_starttls',
-          host,
-          port,
-          secure: isDirectTls,
-          authenticatedUser: sanitizedUser,
-        });
-      };
-
-      const diagTimer = setTimeout(() => {
-        finishDiag(false, `SMTP verification timed out after 15s communicating with ${host}:${port}`);
-      }, 15000);
-
-      try {
-        if (isDirectTls) {
-          currentSocket = tls.connect({ host, port, rejectUnauthorized: false });
-        } else {
-          currentSocket = net.connect({ host, port });
-        }
-      } catch (err: any) {
-        return finishDiag(false, `Socket connection failed: ${err.message}`);
-      }
-
-      currentSocket.setEncoding('utf8');
-      let step = 0;
-      let buffer = '';
-
-      const sendCmd = (cmd: string) => {
-        if (currentSocket && currentSocket.writable) currentSocket.write(cmd + '\r\n');
-      };
-
-      const onData = (data: string) => {
-        buffer += data;
-        const lines = buffer.split('\r\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line) continue;
-          const code = parseInt(line.substring(0, 3), 10);
-          if (line.charAt(3) === '-') continue;
-
-          if (code >= 400) {
-            return finishDiag(false, `SMTP server rejected command: ${line.substring(4)}`);
-          }
-
-          if (step === 0 && code === 220) {
-            step = 1;
-            sendCmd('EHLO localhost');
-          } else if (step === 1 && code === 250) {
-            if (!isDirectTls) {
-              step = 2;
-              sendCmd('STARTTLS');
-            } else {
-              step = 3;
-              sendCmd('AUTH LOGIN');
-            }
-          } else if (step === 2 && code === 220) {
-            currentSocket.removeAllListeners('data');
-            currentSocket.removeAllListeners('error');
-            const tlsSocket = tls.connect({ socket: currentSocket, host, rejectUnauthorized: false });
-            tlsSocket.setEncoding('utf8');
-            tlsSocket.on('data', onData);
-            tlsSocket.on('error', (err) => finishDiag(false, `TLS negotiation failed: ${err.message}`));
-            currentSocket = tlsSocket;
-
-            tlsSocket.once('secureConnect', () => {
-              step = 10;
-              sendCmd('EHLO localhost');
-            });
-          } else if (step === 10 && code === 250) {
-            step = 3;
-            sendCmd('AUTH LOGIN');
-          } else if (step === 3 && code === 334) {
-            step = 4;
-            sendCmd(Buffer.from(sanitizedUser).toString('base64'));
-          } else if (step === 4 && code === 334) {
-            step = 5;
-            sendCmd(Buffer.from(sanitizedPass).toString('base64'));
-          } else if (step === 5 && code === 235) {
-            finishDiag(true, `SMTP authentication accepted by ${host}:${port} for ${sanitizedUser}`);
-          }
-        }
-      };
-
-      currentSocket.on('data', onData);
-      currentSocket.on('error', (err) => finishDiag(false, `Socket communication error: ${err.message}`));
-      currentSocket.on('close', () => {
-        if (!completed) finishDiag(false, 'Connection closed by server during verification');
+    // Try Nodemailer verify with STARTTLS
+    try {
+      const isSecurePort = secure || port === 465;
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: isSecurePort,
+        requireTLS: !isSecurePort, // Enforce STARTTLS for port 587
+        auth: {
+          user: sanitizedUser,
+          pass: sanitizedPass,
+        },
+        tls: {
+          rejectUnauthorized: false,
+          minVersion: 'TLSv1.2',
+        },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
       });
+
+      await transporter.verify();
+      return {
+        success: true,
+        message: `SMTP connection and authentication verified via Nodemailer (${host}:${port})`,
+        provider: 'nodemailer',
+        host,
+        port,
+        secure: isSecurePort,
+        authenticatedUser: sanitizedUser,
+      };
+    } catch (err: any) {
+      const code = err.code || 'UNKNOWN';
+      const response = err.response || '';
+      let advice = '';
+      if (code === 'EAUTH' || response.includes('535') || err.message?.includes('535')) {
+        advice = ' (Invalid credentials: 535 Username and Password not accepted. Check the 16-character Google App Password in backend/.env)';
+      } else if (code === 'ETIMEDOUT') {
+        advice = ' (Connection timed out: outbound port 587 may be blocked by network/firewall)';
+      } else if (code === 'ECONNECTION') {
+        advice = ' (Connection refused or reset by host)';
+      } else if (code === 'ESOCKET') {
+        advice = ' (Socket negotiation failure)';
+      }
+
+      return {
+        success: false,
+        message: `Nodemailer verification failed [${code}]: ${err.message}${advice}`,
+        provider: 'nodemailer',
+        host,
+        port,
+        secure: Boolean(secure),
+        authenticatedUser: sanitizedUser,
+      };
+    }
+  }
+
+  /**
+   * Send Cataloza-branded OTP verification email for account registration and user verification
+   */
+  public static async sendVerificationOtp(
+    email: string,
+    name: string,
+    otp: string
+  ): Promise<void> {
+    const sanitizedEmail = email.toLowerCase().trim();
+    const displayName = (name || '').trim() || 'there';
+
+    const subject = 'Verify Your Email — Cataloza';
+
+    const text =
+      `Welcome to Cataloza!\n\n` +
+      `Hello ${displayName},\n\n` +
+      `Use the following verification code to complete your account verification:\n\n` +
+      `${otp}\n\n` +
+      `This verification code will expire in 10 minutes.\n\n` +
+      `If you did not request this code, please ignore this email.\n\n` +
+      `Cataloza Team`;
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify Your Email — Cataloza</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; padding: 40px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width: 520px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08);">
+          <!-- Header -->
+          <tr>
+            <td style="padding: 32px 32px 24px; text-align: center; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);">
+              <div style="display: inline-block; background-color: #ffffff; color: #2563eb; width: 44px; height: 44px; line-height: 44px; border-radius: 12px; font-weight: 900; font-size: 22px; margin-bottom: 12px;">
+                C
+              </div>
+              <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 800; letter-spacing: -0.02em;">
+                Cataloza
+              </h1>
+              <p style="margin: 6px 0 0 0; color: #bfdbfe; font-size: 13px;">
+                Wholesale E-Commerce Platform
+              </p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding: 32px;">
+              <h2 style="margin: 0 0 12px 0; color: #0f172a; font-size: 18px; font-weight: 700;">
+                Welcome to Cataloza!
+              </h2>
+              <p style="margin: 0 0 16px 0; color: #475569; font-size: 14px; line-height: 1.6;">
+                Hello <strong>${displayName}</strong>,
+              </p>
+              <p style="margin: 0 0 24px 0; color: #475569; font-size: 14px; line-height: 1.6;">
+                Use the following verification code to complete your account verification:
+              </p>
+
+              <!-- OTP Code Display -->
+              <div style="background-color: #f8fafc; border: 2px dashed #2563eb; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
+                <span style="font-family: 'Courier New', Courier, monospace; font-size: 36px; font-weight: 900; color: #1e293b; letter-spacing: 10px; display: inline-block; margin-left: 10px;">
+                  ${otp}
+                </span>
+                <p style="margin: 8px 0 0 0; color: #64748b; font-size: 12px; font-weight: 600;">
+                  ⏱ This verification code will expire in 10 minutes.
+                </p>
+              </div>
+
+              <!-- Notice -->
+              <p style="margin: 0 0 24px 0; color: #64748b; font-size: 13px; line-height: 1.5;">
+                If you did not request this code, please ignore this email.
+              </p>
+
+              <p style="margin: 0; color: #334155; font-size: 14px; font-weight: 600;">
+                Cataloza Team
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 20px 32px; background-color: #f8fafc; text-align: center; border-top: 1px solid #e2e8f0;">
+              <p style="margin: 0; color: #94a3b8; font-size: 11px;">
+                © ${new Date().getFullYear()} Cataloza • Automated account security message.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;
+
+    await this.sendViaSmtp({
+      to: sanitizedEmail,
+      subject,
+      text,
+      html,
     });
   }
 
   /**
-   * Send Super Admin OTP exclusively to the verified Super Admin email
+   * Send Super Admin 2FA OTP code
    */
   public static async sendSuperAdminOtp(email: string, otp: string): Promise<void> {
-    const targetEmail = 'cpnihal35@gmail.com';
-    const sanitizedEmail = email.toLowerCase().trim();
+    const targetEmail = (email || config.superAdmin.email || 'cpnihal35@gmail.com').toLowerCase().trim();
+    const subject = '🔐 Super Admin Login Verification Code — Cataloza';
 
-    if (sanitizedEmail !== targetEmail) {
-      throw new Error(`Unauthorized recipient. Super Admin OTP can only be dispatched to ${targetEmail}`);
-    }
-
-    const subject = '🔐 Super Admin Login Verification Code — Cateloge';
-
-    const text = `Cateloge Security Verification\n\n` +
+    const text = `Cataloza Security Verification\n\n` +
       `Your Super Admin login verification code is: ${otp}\n\n` +
-      `This code will expire in 5 minutes.\n` +
-      `If you did not initiate this login attempt, please change your Super Admin credentials immediately.\n\n` +
-      `— Cateloge Security HQ`;
+      `This code will expire in 10 minutes.\n` +
+      `If you did not initiate this login attempt, please review your account security immediately.\n\n` +
+      `— Cataloza Security HQ`;
 
     const html = `
 <!DOCTYPE html>
@@ -502,58 +535,46 @@ export class EmailService {
     <tr>
       <td align="center">
         <table role="presentation" width="100%" style="max-width: 540px; background-color: #1e293b; border-radius: 16px; border: 1px solid #334155; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
-          <!-- Header -->
           <tr>
-            <td style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155;">
+            <td style="padding: 32px 32px 24px; text-align: center; border-bottom: 1px solid #334155;">
               <div style="display: inline-block; background-color: #4f46e5; color: #ffffff; width: 44px; height: 44px; line-height: 44px; border-radius: 12px; font-weight: 900; font-size: 20px; margin-bottom: 12px;">
                 C
               </div>
               <h1 style="margin: 0; color: #f8fafc; font-size: 20px; font-weight: 800; letter-spacing: -0.025em;">
-                Cateloge Security HQ
+                Cataloza Security HQ
               </h1>
-              <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 13px;">
+              <p style="margin: 6px 0 0; color: #94a3b8; font-size: 13px;">
                 Super Admin Two-Factor Authentication
               </p>
             </td>
           </tr>
-
-          <!-- Body -->
           <tr>
             <td style="padding: 32px;">
-              <p style="margin: 0 0 16px 0; color: #e2e8f0; font-size: 14px; line-height: 1.6;">
+              <p style="margin: 0 0 16px; color: #e2e8f0; font-size: 14px; line-height: 1.6;">
                 A sign-in attempt was initiated for the Super Administrator account (<strong>${targetEmail}</strong>).
               </p>
-              <p style="margin: 0 0 24px 0; color: #94a3b8; font-size: 13px; line-height: 1.5;">
+              <p style="margin: 0 0 24px; color: #94a3b8; font-size: 13px; line-height: 1.5;">
                 Enter the six-digit verification code below to authorize your session:
               </p>
-
-              <!-- OTP Code Display -->
               <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); border: 2px solid #6366f1; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
                 <span style="font-family: 'Courier New', Courier, monospace; font-size: 38px; font-weight: 900; color: #ffffff; letter-spacing: 12px; display: inline-block; margin-left: 12px;">
                   ${otp}
                 </span>
-                <p style="margin: 8px 0 0 0; color: #a5b4fc; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">
-                  Valid for 5 minutes only
+                <p style="margin: 8px 0 0; color: #a5b4fc; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">
+                  Valid for 10 minutes only
                 </p>
               </div>
-
-              <!-- Security notice -->
               <div style="background-color: #334155; border-left: 4px solid #f59e0b; border-radius: 6px; padding: 12px 16px; margin-top: 24px;">
                 <p style="margin: 0; color: #cbd5e1; font-size: 12px; line-height: 1.5;">
-                  <strong style="color: #fbbf24;">Security Notice:</strong> Cateloge administrators will never request this code. Do not share it with anyone.
+                  <strong style="color: #fbbf24;">Security Notice:</strong> Cataloza administrators will never request this code. Do not share it with anyone.
                 </p>
               </div>
             </td>
           </tr>
-
-          <!-- Footer -->
           <tr>
             <td style="padding: 24px 32px; background-color: #0f172a; text-align: center; border-top: 1px solid #334155;">
               <p style="margin: 0; color: #64748b; font-size: 11px;">
-                Cateloge B2B SaaS Platform • Multi-Tenant Wholesale Commerce System
-              </p>
-              <p style="margin: 4px 0 0 0; color: #475569; font-size: 10px;">
-                This automated security notification was sent to authorized Super Admin ${targetEmail}.
+                Cataloza Platform • Multi-Tenant Wholesale Commerce System
               </p>
             </td>
           </tr>
@@ -582,14 +603,14 @@ export class EmailService {
     shopName: string,
     inviteUrl: string
   ): Promise<void> {
-    const subject = `You've been invited to manage ${shopName} on Cateloge`;
+    const subject = `You've been invited to manage ${shopName} on Cataloza`;
 
     const text = `Hello ${adminName},\n\n` +
-      `You have been provisioned as a Shop Administrator for ${shopName} on Cateloge.\n\n` +
+      `You have been provisioned as a Shop Administrator for ${shopName} on Cataloza.\n\n` +
       `Click the link below to set your secure password and access your dashboard:\n` +
       `${inviteUrl}\n\n` +
       `This invitation link is valid for 7 days.\n\n` +
-      `— Cateloge Platform`;
+      `— Cataloza Platform`;
 
     const html = `
 <!DOCTYPE html>
@@ -605,7 +626,7 @@ export class EmailService {
         <table width="100%" style="max-width: 500px; background-color:#ffffff; border-radius:12px; border:1px solid #e2e8f0; padding:32px;">
           <tr>
             <td>
-              <h2 style="color:#0f172a; margin-top:0;">Welcome to Cateloge</h2>
+              <h2 style="color:#0f172a; margin-top:0;">Welcome to Cataloza</h2>
               <p style="color:#475569; font-size:14px; line-height:1.6;">
                 Hello <strong>${adminName}</strong>,<br><br>
                 You have been assigned as a Shop Administrator for <strong>${shopName}</strong>.
@@ -646,21 +667,16 @@ export class EmailService {
     resetToken: string
   ): Promise<void> {
     const sanitizedEmail = email.toLowerCase().trim();
+    const subject = '🔑 Password Reset Request — Cataloza';
 
-    if (sanitizedEmail === 'cpnihal35@gmail.com' && email.toLowerCase().trim() !== 'cpnihal35@gmail.com') {
-      throw new Error('Super Admin password reset can only be delivered to cpnihal35@gmail.com');
-    }
-
-    const subject = '🔑 Password Reset Request — Cateloge';
-
-    const text = `Cateloge Password Reset Request\n\n` +
-      `We received a request to reset your Cateloge password.\n\n` +
+    const text = `Cataloza Password Reset Request\n\n` +
+      `We received a request to reset your Cataloza password.\n\n` +
       `Click the link below to configure a new password:\n` +
       `${resetUrl}\n\n` +
       `Alternatively, you can manually use your reset token:\n${resetToken}\n\n` +
       `This link will expire in 15 minutes.\n` +
       `If you did not make this request, please ignore this email or review your account security.\n\n` +
-      `— Cateloge Platform Security`;
+      `— Cataloza Platform Security`;
 
     const html = `
 <!DOCTYPE html>
@@ -683,7 +699,7 @@ export class EmailService {
                 Password Reset Request
               </h1>
               <p style="margin: 6px 0 0; color: #94a3b8; font-size: 13px;">
-                Cateloge Security Authentication
+                Cataloza Security Authentication
               </p>
             </td>
           </tr>
@@ -714,7 +730,7 @@ export class EmailService {
           <tr>
             <td style="padding: 20px 32px; background-color: #0f172a; text-align: center; border-top: 1px solid #334155;">
               <p style="margin: 0; color: #64748b; font-size: 11px;">
-                Cateloge B2B SaaS Platform • Automated Security Notification
+                Cataloza Platform • Automated Security Notification
               </p>
             </td>
           </tr>
@@ -735,21 +751,21 @@ export class EmailService {
   }
 
   /**
-   * Diagnostic test email exclusively sent to the authorized Super Admin
+   * Diagnostic test email sent to an explicitly configured recipient
    */
   public static async sendTestEmail(email: string): Promise<{ success: boolean; message: string }> {
-    const targetEmail = 'cpnihal35@gmail.com';
-    const sanitizedEmail = email.toLowerCase().trim();
+    const sanitizedEmail = (email || config.smtp.user || config.superAdmin.email).toLowerCase().trim();
 
-    if (sanitizedEmail !== targetEmail) {
-      throw new Error(`Unauthorized test recipient. Test emails can only be dispatched to ${targetEmail}`);
+    if (!sanitizedEmail || !sanitizedEmail.includes('@')) {
+      throw new Error(`Invalid test email recipient: ${sanitizedEmail}`);
     }
 
-    const subject = '✅ Cateloge SMTP Delivery Test Successful';
-    const text = `Cateloge SMTP Delivery Diagnostic\n\n` +
+    const subject = '✅ Cataloza SMTP Delivery Test Successful';
+    const text = `Cataloza SMTP Delivery Diagnostic\n\n` +
       `This message confirms that your SMTP provider configuration is accepting and delivering messages successfully.\n\n` +
+      `Recipient: ${sanitizedEmail}\n` +
       `Timestamp: ${new Date().toISOString()}\n` +
-      `— Cateloge Security HQ`;
+      `— Cataloza Security HQ`;
 
     const html = `
 <!DOCTYPE html>
@@ -758,7 +774,7 @@ export class EmailService {
   <div style="max-width: 500px; margin: 0 auto; background-color: #1e293b; padding: 32px; border-radius: 12px; border: 1px solid #334155;">
     <h2 style="color: #10b981; margin-top: 0;">✅ SMTP Delivery Verified</h2>
     <p style="font-size: 14px; color: #cbd5e1; line-height: 1.6;">
-      This email confirms that Cateloge SMTP integration is functional and delivering messages to <strong>${targetEmail}</strong>.
+      This email confirms that Cataloza SMTP integration is functional and delivering messages to <strong>${sanitizedEmail}</strong>.
     </p>
     <p style="font-size: 12px; color: #64748b;">
       Timestamp: ${new Date().toUTCString()}
@@ -769,7 +785,7 @@ export class EmailService {
 `;
 
     await this.sendViaSmtp({
-      to: targetEmail,
+      to: sanitizedEmail,
       subject,
       text,
       html,
@@ -777,7 +793,7 @@ export class EmailService {
 
     return {
       success: true,
-      message: `Test email successfully accepted and dispatched to ${targetEmail}`,
+      message: `Test email successfully accepted and dispatched to ${sanitizedEmail}`,
     };
   }
 }

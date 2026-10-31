@@ -10,13 +10,23 @@ export interface LoginResult {
   message?: string;
 }
 
+export interface RegisterResult {
+  user?: IUser;
+  requiresOtp?: boolean;
+  challengeId?: string;
+  email?: string;
+  message?: string;
+}
+
 interface AuthContextType {
   user: IUser | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<LoginResult>;
+  verifyOtp: (challengeId: string, otp: string) => Promise<IUser>;
+  resendOtp: (challengeId: string) => Promise<void>;
   verifySuperAdminOtp: (challengeId: string, otp: string) => Promise<IUser>;
   resendSuperAdminOtp: (challengeId: string) => Promise<void>;
-  register: (data: any) => Promise<IUser>;
+  register: (data: any) => Promise<RegisterResult>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   changeInitialPassword: (
@@ -66,7 +76,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password: string): Promise<LoginResult> => {
     const res = await api.post('/auth/login', { email, password });
     
-    // Check if 2FA OTP is required (e.g. for cpnihal35@gmail.com)
+    // Check if 2FA OTP is required (e.g. for cpnihal35@gmail.com or unverified user)
     if (res.data?.requiresOtp) {
       return {
         requiresOtp: true,
@@ -84,8 +94,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { user: loggedInUser };
   };
 
-  const verifySuperAdminOtp = async (challengeId: string, otp: string): Promise<IUser> => {
-    const res = await api.post('/auth/super-admin/verify-otp', { challengeId, otp });
+  const verifyOtp = async (challengeId: string, otp: string): Promise<IUser> => {
+    const res = await api.post('/auth/verify-otp', { challengeId, otp });
     const { user: loggedInUser, accessToken } = res.data.data;
     if (accessToken) {
       localStorage.setItem('wf_access_token', accessToken);
@@ -94,18 +104,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return loggedInUser;
   };
 
-  const resendSuperAdminOtp = async (challengeId: string): Promise<void> => {
-    await api.post('/auth/super-admin/resend-otp', { challengeId });
+  const resendOtp = async (challengeId: string): Promise<void> => {
+    await api.post('/auth/resend-otp', { challengeId });
   };
 
-  const register = async (data: any): Promise<IUser> => {
+  const verifySuperAdminOtp = async (challengeId: string, otp: string): Promise<IUser> => {
+    return verifyOtp(challengeId, otp);
+  };
+
+  const resendSuperAdminOtp = async (challengeId: string): Promise<void> => {
+    return resendOtp(challengeId);
+  };
+
+  const register = async (data: any): Promise<RegisterResult> => {
     const res = await api.post('/auth/register', data);
+    if (res.data?.requiresOtp) {
+      return {
+        requiresOtp: true,
+        challengeId: res.data.data?.challengeId,
+        email: res.data.data?.email || data.email,
+        message: res.data.message,
+      };
+    }
     const { user: registeredUser, accessToken } = res.data.data;
     if (accessToken) {
       localStorage.setItem('wf_access_token', accessToken);
     }
     setUser(registeredUser);
-    return registeredUser;
+    return { user: registeredUser };
   };
 
   const logout = async (): Promise<void> => {
@@ -157,6 +183,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         isLoading,
         login,
+        verifyOtp,
+        resendOtp,
         verifySuperAdminOtp,
         resendSuperAdminOtp,
         register,
