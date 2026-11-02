@@ -67,6 +67,7 @@ async function runAuthVerification() {
       userId: admin._id,
       email: 'cpnihal35@gmail.com',
       otpHash,
+      purpose: 'super_admin_2fa',
       expiresAt,
       attempts: 0,
       maxAttempts: 5,
@@ -125,10 +126,10 @@ async function runAuthVerification() {
     await AuthService.bootstrapSuperAdmin({ forceReset: true });
     console.log('[PASS] Super Admin password restored to configured initial password');
 
-    // TEST 6: SMTP Configuration Test
-    console.log('\n--- TEST 6: SMTP Configuration & Sanitization ---');
-    const smtpCheck = await EmailService.verifyConnection();
-    console.log(`[PASS] SMTP Check: ${smtpCheck.message}`);
+    // TEST 6: Resend Email API Configuration Test
+    console.log('\n--- TEST 6: Resend Email API Configuration & Authentication ---');
+    const emailCheck = await EmailService.verifyConnection();
+    console.log(`[PASS] Email Check: ${emailCheck.message}`);
 
     console.log('\n================================================================');
     console.log('🎉 ALL AUTHENTICATION AND SECURITY ACCEPTANCE TESTS PASSED!');

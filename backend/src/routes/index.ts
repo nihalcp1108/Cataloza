@@ -23,7 +23,8 @@ router.get('/health', (_req, res) => {
     database: isDbConnected ? 'connected' : 'disconnected',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    smtpConfigured: Boolean(config.smtp.host && config.smtp.user && config.smtp.pass),
+    emailService: 'resend',
+    emailConfigured: Boolean(config.resend.apiKey),
   });
 });
 

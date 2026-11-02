@@ -16,48 +16,38 @@ import { AuthService } from '../src/services/auth.service';
 
 async function runEmailDiagnostic() {
   console.log('============================================================');
-  console.log('📧 CATALOZA SMTP & OTP EMAIL DELIVERY DIAGNOSTIC');
+  console.log('📧 CATALOZA RESEND EMAIL API DIAGNOSTIC (HTTPS)');
   console.log('============================================================\n');
 
   // Step 1: Validate Environment Configuration
-  console.log('1. Checking SMTP environment configuration...');
+  console.log('1. Checking Resend environment configuration...');
   const envCheck = EmailService.validateEnvironment();
   if (!envCheck.valid) {
-    console.error('❌ Missing required SMTP configuration in backend/.env:');
+    console.error('❌ Missing required Resend configuration in backend/.env:');
     envCheck.missingVars.forEach((v) => console.error(`   - ${v}`));
     process.exit(1);
   }
 
-  const { host, port, secure, user, pass, from } = config.smtp;
-  const maskedPass = pass ? '••••••••••••••••' : '(not set)';
-  console.log(`   Host:     ${host}`);
-  console.log(`   Port:     ${port} (secure: ${secure})`);
-  console.log(`   User:     ${user}`);
-  console.log(`   Password: ${maskedPass} (length: ${pass ? pass.length : 0})`);
+  const { apiKey, from } = config.resend;
+  const maskedKey = apiKey
+    ? `${apiKey.substring(0, 7)}••••••••${apiKey.substring(apiKey.length - 4)}`
+    : '(not set)';
+  console.log(`   Provider: Resend HTTPS API (Port 443)`);
+  console.log(`   API Key:  ${maskedKey} (length: ${apiKey.length})`);
   console.log(`   From:     ${from}`);
-  console.log('   ✅ Environment variables are loaded and normalized.\n');
+  console.log('   ✅ Environment variables are loaded.\n');
 
-  // Step 2: Test SMTP Connection & Authentication via STARTTLS on Port 587
-  console.log(`2. Connecting to ${host}:${port} via STARTTLS and authenticating...`);
+  // Step 2: Test Resend HTTPS API Authentication
+  console.log('2. Authenticating with Resend HTTPS API (https://api.resend.com)...');
   const diag = await EmailService.verifyConnection();
   if (diag.success) {
     console.log(`   ✅ PASS: ${diag.message}\n`);
   } else {
     console.error(`   ❌ FAIL: ${diag.message}`);
-    if (diag.message.includes('535') || diag.message.includes('EAUTH')) {
-      console.error('\n   ⚠️  AUTHENTICATION ERROR (535 / EAUTH):');
-      console.error('   Google rejected the provided SMTP username/password combination.');
-      console.error('   Requirements:');
-      console.error('   1. Ensure 2-Step Verification is turned ON for the Google Account.');
-      console.error('   2. Generate an App Password at https://myaccount.google.com/apppasswords');
-      console.error('   3. Put the 16-character App Password into backend/.env as SMTP_PASS.');
-    } else if (diag.message.includes('ETIMEDOUT') || diag.message.includes('ECONNECTION')) {
-      console.error('\n   ⚠️  NETWORK ERROR (ETIMEDOUT / ECONNECTION):');
-      console.error('   Unable to reach smtp.gmail.com:587. Check firewall, proxy, or ISP port 587 blocking.');
-    }
-    console.error('\n============================================================');
-    console.error('❌ DIAGNOSTIC FAILED AT SMTP AUTHENTICATION STEP');
-    console.error('============================================================');
+    console.error('\n   ⚠️  RESEND AUTHENTICATION ERROR:');
+    console.error('   Please ensure:');
+    console.error('   1. RESEND_API_KEY in backend/.env is valid and active.');
+    console.error('   2. Network has outbound HTTPS (port 443) access to https://api.resend.com.\n');
     process.exit(1);
   }
 
@@ -66,13 +56,18 @@ async function runEmailDiagnostic() {
   const isSuperAdminTest = process.argv.includes('--super-admin') || process.argv.includes('--otp-flow');
 
   if (targetRecipient && !targetRecipient.startsWith('--')) {
-    console.log(`3. Sending test verification OTP email to: ${targetRecipient}...`);
+    console.log(`3. Sending test verification OTP email via Resend to: ${targetRecipient}...`);
     try {
       const testOtp = '849201';
       await EmailService.sendVerificationOtp(targetRecipient, 'Cataloza Diagnostic Tester', testOtp);
-      console.log(`   ✅ PASS: Test verification email accepted by SMTP server for delivery to ${targetRecipient}.\n`);
+      console.log(`   ✅ PASS: Test verification email accepted by Resend for delivery to ${targetRecipient}.\n`);
     } catch (err: any) {
       console.error(`   ❌ FAIL: Could not deliver test email to ${targetRecipient}:`, err.message);
+      if (err.message.includes('own email address')) {
+        console.error('   Hint: When using onboarding@resend.dev, Resend only allows sending to');
+        console.error('         the email address used to register the Resend account.');
+        console.error('         For general recipients, verify your domain at resend.com/domains.\n');
+      }
       process.exit(1);
     }
   } else if (!isSuperAdminTest) {
@@ -83,7 +78,7 @@ async function runEmailDiagnostic() {
 
   // Step 4: Super Admin OTP Workflow Test (if requested)
   if (isSuperAdminTest) {
-    console.log('4. Testing Complete Super Admin OTP Flow in Database & Email...');
+    console.log('4. Testing Complete Super Admin OTP Flow in Database & Email via Resend...');
     try {
       await mongoose.connect(config.mongoUri);
       console.log('   [DB] Connected to MongoDB Atlas');
@@ -111,14 +106,14 @@ async function runEmailDiagnostic() {
       const challengeId = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-      // 3. Dispatch OTP via EmailService
-      console.log(`   Sending Super Admin 2FA OTP to ${adminEmail}...`);
+      // 3. Dispatch OTP via EmailService (Resend HTTPS)
+      console.log(`   Sending Super Admin 2FA OTP via Resend to ${adminEmail}...`);
       await EmailService.sendSuperAdminOtp(adminEmail, otpCode);
-      console.log(`   ✅ Step 4.2: Super Admin OTP dispatched to ${adminEmail}.`);
+      console.log(`   ✅ Step 4.2: Super Admin OTP dispatched to ${adminEmail} via Resend.`);
 
       // 4. Record OtpChallenge in DB
       await OtpChallenge.updateMany({ userId: admin._id, used: false }, { used: true });
-      const challenge = await OtpChallenge.create({
+      await OtpChallenge.create({
         challengeId,
         userId: admin._id,
         email: adminEmail,
@@ -137,7 +132,7 @@ async function runEmailDiagnostic() {
       const verifyResult = await AuthService.verifyOtp(challengeId, otpCode);
       console.log(`   ✅ Step 4.4: OTP verified! Access token issued for role: ${verifyResult.user.role}`);
 
-      console.log('   ✅ Step 4.5: Complete Super Admin OTP Flow PASSED end-to-end.\n');
+      console.log('   ✅ Step 4.5: Complete Super Admin OTP Flow PASSED end-to-end via Resend.\n');
     } catch (err: any) {
       console.error('   ❌ Super Admin OTP Flow test failed:', err.message);
       process.exit(1);
@@ -147,7 +142,7 @@ async function runEmailDiagnostic() {
   }
 
   console.log('============================================================');
-  console.log('🎉 EMAIL SERVICE DIAGNOSTIC COMPLETED SUCCESSFULLY');
+  console.log('🎉 RESEND EMAIL SERVICE DIAGNOSTIC COMPLETED SUCCESSFULLY');
   console.log('============================================================');
 }
 

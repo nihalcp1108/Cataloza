@@ -68,7 +68,7 @@ const startServer = async (): Promise<void> => {
     // 3. Connect to MongoDB Atlas (must successfully connect before accepting requests)
     await connectDatabase();
 
-    // 4. Validate recommended SMTP & administrative environment variables
+    // 4. Validate recommended Resend & administrative environment variables
     const envCheck = EmailService.validateEnvironment();
     if (!envCheck.valid) {
       console.warn(
@@ -76,7 +76,7 @@ const startServer = async (): Promise<void> => {
       );
     } else {
       console.log(
-        `[Startup] ✅ Email environment validated: ${config.smtp.host}:${config.smtp.port} (${config.smtp.user})`
+        `[Startup] ✅ Resend Email API validated (Sender: ${config.resend.from})`
       );
     }
 

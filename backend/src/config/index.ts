@@ -48,6 +48,11 @@ export const config = {
     isConfigured: Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET),
   },
 
+  resend: {
+    apiKey: (process.env.RESEND_API_KEY || '').trim(),
+    from: (process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || 'Cataloza <onboarding@resend.dev>').replace(/^["']|["']$/g, '').trim(),
+  },
+
   smtp: {
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.SMTP_PORT || '587', 10),

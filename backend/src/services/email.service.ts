@@ -1,7 +1,4 @@
-import net from 'net';
-import tls from 'tls';
-import crypto from 'crypto';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { config } from '../config';
 
 export interface EmailOptions {
@@ -11,29 +8,46 @@ export interface EmailOptions {
   html: string;
 }
 
-export interface SmtpDiagnosticResult {
+export interface EmailDiagnosticResult {
   success: boolean;
   message: string;
   provider: string;
-  host: string;
-  port: number;
-  secure: boolean;
-  authenticatedUser: string;
+  from?: string;
   missingVariables?: string[];
 }
 
+// Backwards-compatible alias for any legacy imports
+export type SmtpDiagnosticResult = EmailDiagnosticResult;
+
 export class EmailService {
+  private static resendClient: Resend | null = null;
+
+  /**
+   * Lazily initializes and returns the Resend client
+   */
+  private static getResendClient(): Resend {
+    if (!this.resendClient) {
+      const apiKey = config.resend.apiKey;
+      if (!apiKey) {
+        throw new Error(
+          'Resend API key is not configured. Please set RESEND_API_KEY in your environment variables.'
+        );
+      }
+      this.resendClient = new Resend(apiKey);
+    }
+    return this.resendClient;
+  }
+
   /**
    * Validate required environment variables at startup.
-   * Reports missing variable NAMES without revealing their secret values.
+   * Reports missing variable NAMES without revealing secret values.
    */
   public static validateEnvironment(): { valid: boolean; missingVars: string[] } {
     const missingVars: string[] = [];
-    const { host, user, pass } = config.smtp;
+    const { apiKey, from } = config.resend;
 
-    if (!host) missingVars.push('SMTP_HOST');
-    if (!user) missingVars.push('SMTP_USER');
-    if (!pass) missingVars.push('SMTP_PASS');
+    if (!apiKey) missingVars.push('RESEND_API_KEY');
+    if (!from) missingVars.push('RESEND_FROM_EMAIL');
     if (!config.superAdmin.email) missingVars.push('SUPER_ADMIN_EMAIL');
 
     return {
@@ -43,360 +57,127 @@ export class EmailService {
   }
 
   /**
-   * Dispatches email using Nodemailer with native TLS socket fallback.
+   * Central email dispatch method using Resend HTTPS API
+   * Compatible with Railway Hobby plan (no outbound SMTP port 587/465 required).
    */
-  private static async sendViaSmtp(options: EmailOptions): Promise<void> {
-    const { host, port, secure, user, pass, from } = config.smtp;
-    const sanitizedUser = (user || '').trim();
-    const sanitizedPass = (pass || '').replace(/\s+/g, '');
+  public static async sendEmail(options: EmailOptions): Promise<{ id: string }> {
+    const resend = this.getResendClient();
+    const fromAddress = config.resend.from || 'Cataloza <onboarding@resend.dev>';
+    const sanitizedTo = (options.to || '').toLowerCase().trim();
 
-    if (!host || !sanitizedUser || !sanitizedPass) {
-      const missing: string[] = [];
-      if (!host) missing.push('SMTP_HOST');
-      if (!sanitizedUser) missing.push('SMTP_USER');
-      if (!sanitizedPass) missing.push('SMTP_PASS');
-      throw new Error(`SMTP service is not configured. Missing environment variables: ${missing.join(', ')}`);
+    if (!sanitizedTo || !sanitizedTo.includes('@')) {
+      throw new Error(`Invalid recipient email address: "${options.to}"`);
     }
 
-    const isSecurePort = secure === true || port === 465;
-
-    // Requirement 10: Ensure sender address matches the authenticated Gmail account
-    // Format: "Cataloza OTP" <catalozaofficial@gmail.com>
-    let senderName = 'Cataloza OTP';
-    if (from) {
-      const nameMatch = from.match(/^["']?([^"'<]+)["']?/);
-      if (nameMatch && nameMatch[1].trim()) {
-        senderName = nameMatch[1].trim();
-      }
-    }
-    const formattedFrom = `"${senderName}" <${sanitizedUser}>`;
-
-    // 1. Primary: Nodemailer transport with STARTTLS on port 587
     try {
-      const transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure: isSecurePort,
-        requireTLS: !isSecurePort, // Enforces STARTTLS on port 587
-        auth: {
-          user: sanitizedUser,
-          pass: sanitizedPass,
-        },
-        tls: {
-          rejectUnauthorized: false,
-          minVersion: 'TLSv1.2',
-        },
-        connectionTimeout: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 20000,
-      });
-
-      const info = await transporter.sendMail({
-        from: formattedFrom,
-        to: options.to,
+      const { data, error } = await resend.emails.send({
+        from: fromAddress,
+        to: [sanitizedTo],
         subject: options.subject,
         text: options.text,
         html: options.html,
-        envelope: {
-          from: sanitizedUser,
-          to: options.to,
-        },
       });
 
-      console.log(`[EmailService] ✅ Verification email accepted by SMTP server for delivery to ${options.to} (MessageId: ${info.messageId})`);
-      return;
-    } catch (nodemailerErr: any) {
-      const code = nodemailerErr.code || 'UNKNOWN';
-      const response = nodemailerErr.response || '';
-      console.warn(`[EmailService] ⚠️ Nodemailer dispatch failed to ${options.to} [Code: ${code}]: ${nodemailerErr.message} ${response ? `(${response})` : ''}, falling back to native TLS socket engine.`);
-    }
+      if (error) {
+        console.error(`[EmailService] ❌ Resend API delivery failed for ${sanitizedTo}:`, error.message);
 
-    // 2. Secondary: High-performance native Node.js SMTP socket fallback
-    try {
-      await EmailService.sendViaNativeSocket(options, sanitizedUser, sanitizedPass, formattedFrom);
-      console.log(`[EmailService] ✅ Verification email accepted by native SMTP socket engine for delivery to ${options.to}`);
-    } catch (nativeErr: any) {
-      console.error(`[EmailService] ❌ All email dispatch mechanisms failed for ${options.to}:`, nativeErr.message);
-      const errCode = (nativeErr as any).code || '';
-      if (errCode === 'EAUTH' || nativeErr.message?.includes('535')) {
-        throw new Error('SMTP authentication failed (535): Gmail App Password or username not accepted. Verify the 16-character Google App Password in backend/.env.');
-      } else if (errCode === 'ETIMEDOUT') {
-        throw new Error('SMTP connection timed out connecting to smtp.gmail.com:587. Check network access, firewall, or ISP port 587 blocking.');
-      } else if (errCode === 'ECONNECTION') {
-        throw new Error('SMTP connection failed. Unable to establish connection to smtp.gmail.com:587.');
-      }
-      throw new Error(`Unable to send verification email: ${nativeErr.message}`);
-    }
-  }
-
-  /**
-   * Native Node.js SMTP socket client using net/tls
-   * Handles Port 465 direct TLS, Port 587 STARTTLS with asynchronous secureConnect, and RFC 5321 formatting.
-   */
-  private static async sendViaNativeSocket(
-    options: EmailOptions,
-    sanitizedUser: string,
-    sanitizedPass: string,
-    formattedFrom: string
-  ): Promise<void> {
-    const { host, port, secure } = config.smtp;
-    const isDirectTls = secure || port === 465;
-
-    return new Promise((resolve, reject) => {
-      let isResolvedOrRejected = false;
-      const timeoutMs = 20000;
-
-      let currentSocket: net.Socket | tls.TLSSocket;
-
-      const finish = (err?: Error) => {
-        if (isResolvedOrRejected) return;
-        isResolvedOrRejected = true;
-        clearTimeout(timer);
-        try {
-          if (currentSocket) currentSocket.destroy();
-        } catch {}
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
+        // Handle Resend onboarding sandbox restrictions
+        if (
+          error.statusCode === 403 &&
+          error.message?.includes('You can only send testing emails to your own email address')
+        ) {
+          throw new Error(
+            `Resend sandbox testing restriction: ${error.message} ` +
+            `(To deliver emails to general users in production, please verify your custom domain at https://resend.com/domains and set RESEND_FROM_EMAIL).`
+          );
         }
-      };
 
-      const timer = setTimeout(() => {
-        finish(new Error(`SMTP connection timed out after ${timeoutMs / 1000}s while communicating with ${host}:${port}`));
-      }, timeoutMs);
+        // Handle rate limiting (Free tier: 2 requests/second)
+        if (error.statusCode === 429) {
+          throw new Error('Resend rate limit exceeded (max 2 requests/sec on free tier). Please retry in a few moments.');
+        }
 
-      // Establish initial socket
-      if (isDirectTls) {
-        currentSocket = tls.connect({
-          host,
-          port,
-          rejectUnauthorized: false,
-        });
-      } else {
-        currentSocket = net.connect({
-          host,
-          port,
-        });
+        // Handle invalid API keys or validation errors
+        if (error.name === 'validation_error' || error.message?.includes('API key')) {
+          throw new Error(`Resend configuration error: ${error.message}`);
+        }
+
+        throw new Error(`Email delivery failed: ${error.message}`);
       }
 
-      currentSocket.setEncoding('utf8');
+      if (!data?.id) {
+        throw new Error('Resend accepted request but did not return a message ID.');
+      }
 
-      let buffer = '';
-      let step = 0; // 0=connect, 1=ehlo, 2=starttls, 10=ehlo_after_tls, 3=auth_login, 4=user, 5=pass, 6=mail_from, 7=rcpt_to, 8=data, 9=data_body, 99=quit
-
-      const sendCommand = (cmd: string) => {
-        if (currentSocket && currentSocket.writable) {
-          currentSocket.write(cmd + '\r\n');
-        }
-      };
-
-      const handleResponse = (data: string) => {
-        buffer += data;
-        const lines = buffer.split('\r\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line) continue;
-          const code = parseInt(line.substring(0, 3), 10);
-          const isMultiline = line.charAt(3) === '-';
-          if (isMultiline) continue;
-
-          // Reject on SMTP negative error responses (4xx / 5xx)
-          if (code >= 400) {
-            return finish(new Error(`SMTP server rejected command with code ${code}: ${line.substring(4)}`));
-          }
-
-          if (step === 0 && code === 220) {
-            // Connected to SMTP server
-            step = 1;
-            sendCommand('EHLO localhost');
-          } else if (step === 1 && code === 250) {
-            if (!isDirectTls) {
-              // Port 587: Upgrade to STARTTLS
-              step = 2;
-              sendCommand('STARTTLS');
-            } else {
-              // Direct TLS (Port 465): Proceed directly to AUTH LOGIN
-              step = 3;
-              sendCommand('AUTH LOGIN');
-            }
-          } else if (step === 2 && code === 220) {
-            // STARTTLS accepted by server: perform TLS handshake on the existing socket
-            currentSocket.removeAllListeners('data');
-            currentSocket.removeAllListeners('error');
-            currentSocket.removeAllListeners('close');
-
-            const tlsSocket = tls.connect({
-              socket: currentSocket,
-              host,
-              rejectUnauthorized: false,
-            });
-
-            tlsSocket.setEncoding('utf8');
-            tlsSocket.on('data', handleResponse);
-            tlsSocket.on('error', (err) => finish(new Error(`TLS negotiation error on ${host}:${port}: ${err.message}`)));
-            tlsSocket.on('close', () => {
-              if (!isResolvedOrRejected && step !== 99) {
-                finish(new Error('SMTP connection closed during TLS session'));
-              }
-            });
-
-            currentSocket = tlsSocket;
-
-            tlsSocket.once('secureConnect', () => {
-              step = 10;
-              sendCommand('EHLO localhost');
-            });
-          } else if (step === 10 && code === 250) {
-            // Post-TLS EHLO acknowledged, proceed to AUTH LOGIN
-            step = 3;
-            sendCommand('AUTH LOGIN');
-          } else if (step === 3 && code === 334) {
-            // Username prompt
-            step = 4;
-            sendCommand(Buffer.from(sanitizedUser).toString('base64'));
-          } else if (step === 4 && code === 334) {
-            // Password prompt
-            step = 5;
-            sendCommand(Buffer.from(sanitizedPass).toString('base64'));
-          } else if (step === 5 && code === 235) {
-            // Authentication successful! Use sanitizedUser as envelope MAIL FROM to satisfy Gmail policy
-            step = 6;
-            sendCommand(`MAIL FROM:<${sanitizedUser}>`);
-          } else if (step === 6 && code === 250) {
-            step = 7;
-            sendCommand(`RCPT TO:<${options.to}>`);
-          } else if (step === 7 && code === 250) {
-            step = 8;
-            sendCommand('DATA');
-          } else if (step === 8 && code === 354) {
-            step = 9;
-            const boundary = `====_Cataloza_${crypto.randomBytes(16).toString('hex')}_====`;
-            const messageId = `<${Date.now()}.${crypto.randomBytes(8).toString('hex')}@cataloza.com>`;
-            const dateStr = new Date().toUTCString();
-
-            const rawMessage = [
-              `From: ${formattedFrom}`,
-              `To: ${options.to}`,
-              `Subject: ${options.subject}`,
-              `Date: ${dateStr}`,
-              `Message-ID: ${messageId}`,
-              `MIME-Version: 1.0`,
-              `Content-Type: multipart/alternative; boundary="${boundary}"`,
-              '',
-              `--${boundary}`,
-              `Content-Type: text/plain; charset=UTF-8`,
-              `Content-Transfer-Encoding: 7bit`,
-              '',
-              options.text,
-              '',
-              `--${boundary}`,
-              `Content-Type: text/html; charset=UTF-8`,
-              `Content-Transfer-Encoding: 7bit`,
-              '',
-              options.html,
-              '',
-              `--${boundary}--`,
-              '.',
-            ].join('\r\n');
-
-            currentSocket.write(rawMessage + '\r\n');
-          } else if (step === 9 && code === 250) {
-            // Email accepted by provider for delivery!
-            step = 99;
-            sendCommand('QUIT');
-            finish();
-          }
-        }
-      };
-
-      currentSocket.on('data', handleResponse);
-      currentSocket.on('error', (err) => finish(new Error(`SMTP socket error on ${host}:${port}: ${err.message}`)));
-      currentSocket.on('close', () => {
-        if (!isResolvedOrRejected && step !== 99) {
-          finish(new Error('SMTP connection closed prematurely by server before delivery was confirmed'));
-        }
-      });
-    });
+      console.log(`[EmailService] ✅ Email dispatched via Resend HTTPS API to ${sanitizedTo} (MessageId: ${data.id})`);
+      return { id: data.id };
+    } catch (err: any) {
+      if (
+        err.message &&
+        (err.message.startsWith('Resend') ||
+          err.message.startsWith('Email delivery failed') ||
+          err.message.startsWith('Invalid recipient'))
+      ) {
+        throw err;
+      }
+      console.error(`[EmailService] ❌ Unexpected Resend exception for ${sanitizedTo}:`, err.message);
+      throw new Error(`Email delivery failed: ${err.message}`);
+    }
   }
 
   /**
    * Diagnostic connection tester
-   * Actually connects and authenticates with the configured SMTP server without sending an email.
-   * Reports sanitized information without revealing secret passwords or OTPs.
+   * Validates Resend API authentication over HTTPS without sending an email.
    */
-  public static async verifyConnection(): Promise<SmtpDiagnosticResult> {
-    const { host, port, secure, user, pass } = config.smtp;
-    const sanitizedUser = (user || '').trim();
-    const sanitizedPass = (pass || '').replace(/\s+/g, '');
-
+  public static async verifyConnection(): Promise<EmailDiagnosticResult> {
     const envValidation = this.validateEnvironment();
     if (!envValidation.valid) {
       return {
         success: false,
         message: `Missing required environment variables: ${envValidation.missingVars.join(', ')}`,
-        provider: 'smtp',
-        host: host || 'not set',
-        port,
-        secure: Boolean(secure),
-        authenticatedUser: sanitizedUser || 'not set',
+        provider: 'resend',
+        from: config.resend.from || 'not set',
         missingVariables: envValidation.missingVars,
       };
     }
 
-    // Try Nodemailer verify with STARTTLS
     try {
-      const isSecurePort = secure || port === 465;
-      const transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure: isSecurePort,
-        requireTLS: !isSecurePort, // Enforce STARTTLS for port 587
-        auth: {
-          user: sanitizedUser,
-          pass: sanitizedPass,
-        },
-        tls: {
-          rejectUnauthorized: false,
-          minVersion: 'TLSv1.2',
-        },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-      });
+      const resend = this.getResendClient();
+      const check = await resend.apiKeys.list();
 
-      await transporter.verify();
-      return {
-        success: true,
-        message: `SMTP connection and authentication verified via Nodemailer (${host}:${port})`,
-        provider: 'nodemailer',
-        host,
-        port,
-        secure: isSecurePort,
-        authenticatedUser: sanitizedUser,
-      };
-    } catch (err: any) {
-      const code = err.code || 'UNKNOWN';
-      const response = err.response || '';
-      let advice = '';
-      if (code === 'EAUTH' || response.includes('535') || err.message?.includes('535')) {
-        advice = ' (Invalid credentials: 535 Username and Password not accepted. Check the 16-character Google App Password in backend/.env)';
-      } else if (code === 'ETIMEDOUT') {
-        advice = ' (Connection timed out: outbound port 587 may be blocked by network/firewall)';
-      } else if (code === 'ECONNECTION') {
-        advice = ' (Connection refused or reset by host)';
-      } else if (code === 'ESOCKET') {
-        advice = ' (Socket negotiation failure)';
+      // If valid full-access key
+      if (!check.error) {
+        return {
+          success: true,
+          message: 'Resend API authenticated successfully over HTTPS (Full Access API Key)',
+          provider: 'resend',
+          from: config.resend.from,
+        };
       }
 
+      // If valid sending-access key (standard/recommended permission)
+      if (check.error.name === 'restricted_api_key') {
+        return {
+          success: true,
+          message: 'Resend API authenticated successfully over HTTPS (Sending Access API Key)',
+          provider: 'resend',
+          from: config.resend.from,
+        };
+      }
+
+      // Invalid key
       return {
         success: false,
-        message: `Nodemailer verification failed [${code}]: ${err.message}${advice}`,
-        provider: 'nodemailer',
-        host,
-        port,
-        secure: Boolean(secure),
-        authenticatedUser: sanitizedUser,
+        message: `Resend authentication failed: ${check.error.message}`,
+        provider: 'resend',
+        from: config.resend.from,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Resend connectivity error: ${err.message}`,
+        provider: 'resend',
+        from: config.resend.from,
       };
     }
   }
@@ -501,7 +282,7 @@ export class EmailService {
 </html>
 `;
 
-    await this.sendViaSmtp({
+    await this.sendEmail({
       to: sanitizedEmail,
       subject,
       text,
@@ -516,7 +297,8 @@ export class EmailService {
     const targetEmail = (email || config.superAdmin.email || 'cpnihal35@gmail.com').toLowerCase().trim();
     const subject = '🔐 Super Admin Login Verification Code — Cataloza';
 
-    const text = `Cataloza Security Verification\n\n` +
+    const text =
+      `Cataloza Security Verification\n\n` +
       `Your Super Admin login verification code is: ${otp}\n\n` +
       `This code will expire in 10 minutes.\n` +
       `If you did not initiate this login attempt, please review your account security immediately.\n\n` +
@@ -586,7 +368,7 @@ export class EmailService {
 </html>
 `;
 
-    await this.sendViaSmtp({
+    await this.sendEmail({
       to: targetEmail,
       subject,
       text,
@@ -605,7 +387,8 @@ export class EmailService {
   ): Promise<void> {
     const subject = `You've been invited to manage ${shopName} on Cataloza`;
 
-    const text = `Hello ${adminName},\n\n` +
+    const text =
+      `Hello ${adminName},\n\n` +
       `You have been provisioned as a Shop Administrator for ${shopName} on Cataloza.\n\n` +
       `Click the link below to set your secure password and access your dashboard:\n` +
       `${inviteUrl}\n\n` +
@@ -650,7 +433,7 @@ export class EmailService {
 </html>
 `;
 
-    await this.sendViaSmtp({
+    await this.sendEmail({
       to: email,
       subject,
       text,
@@ -669,7 +452,8 @@ export class EmailService {
     const sanitizedEmail = email.toLowerCase().trim();
     const subject = '🔑 Password Reset Request — Cataloza';
 
-    const text = `Cataloza Password Reset Request\n\n` +
+    const text =
+      `Cataloza Password Reset Request\n\n` +
       `We received a request to reset your Cataloza password.\n\n` +
       `Click the link below to configure a new password:\n` +
       `${resetUrl}\n\n` +
@@ -742,7 +526,7 @@ export class EmailService {
 </html>
 `;
 
-    await this.sendViaSmtp({
+    await this.sendEmail({
       to: sanitizedEmail,
       subject,
       text,
@@ -754,16 +538,18 @@ export class EmailService {
    * Diagnostic test email sent to an explicitly configured recipient
    */
   public static async sendTestEmail(email: string): Promise<{ success: boolean; message: string }> {
-    const sanitizedEmail = (email || config.smtp.user || config.superAdmin.email).toLowerCase().trim();
+    const sanitizedEmail = (email || config.superAdmin.email).toLowerCase().trim();
 
     if (!sanitizedEmail || !sanitizedEmail.includes('@')) {
       throw new Error(`Invalid test email recipient: ${sanitizedEmail}`);
     }
 
-    const subject = '✅ Cataloza SMTP Delivery Test Successful';
-    const text = `Cataloza SMTP Delivery Diagnostic\n\n` +
-      `This message confirms that your SMTP provider configuration is accepting and delivering messages successfully.\n\n` +
+    const subject = '✅ Cataloza Resend API Delivery Test Successful';
+    const text =
+      `Cataloza Resend Email Delivery Diagnostic\n\n` +
+      `This message confirms that your Resend API integration is authenticating over HTTPS and delivering messages successfully.\n\n` +
       `Recipient: ${sanitizedEmail}\n` +
+      `Sender: ${config.resend.from}\n` +
       `Timestamp: ${new Date().toISOString()}\n` +
       `— Cataloza Security HQ`;
 
@@ -772,11 +558,13 @@ export class EmailService {
 <html>
 <body style="font-family: sans-serif; background-color: #0f172a; color: #f8fafc; padding: 40px 20px;">
   <div style="max-width: 500px; margin: 0 auto; background-color: #1e293b; padding: 32px; border-radius: 12px; border: 1px solid #334155;">
-    <h2 style="color: #10b981; margin-top: 0;">✅ SMTP Delivery Verified</h2>
+    <h2 style="color: #10b981; margin-top: 0;">✅ Resend Delivery Verified</h2>
     <p style="font-size: 14px; color: #cbd5e1; line-height: 1.6;">
-      This email confirms that Cataloza SMTP integration is functional and delivering messages to <strong>${sanitizedEmail}</strong>.
+      This email confirms that Cataloza Resend API integration is functional and delivering messages to <strong>${sanitizedEmail}</strong>.
     </p>
-    <p style="font-size: 12px; color: #64748b;">
+    <p style="font-size: 12px; color: #94a3b8; line-height: 1.5;">
+      Sender Address: <code>${config.resend.from}</code><br>
+      Provider: Resend HTTPS API (Port 443)<br>
       Timestamp: ${new Date().toUTCString()}
     </p>
   </div>
@@ -784,7 +572,7 @@ export class EmailService {
 </html>
 `;
 
-    await this.sendViaSmtp({
+    const result = await this.sendEmail({
       to: sanitizedEmail,
       subject,
       text,
@@ -793,7 +581,7 @@ export class EmailService {
 
     return {
       success: true,
-      message: `Test email successfully accepted and dispatched to ${sanitizedEmail}`,
+      message: `Test email successfully dispatched to ${sanitizedEmail} (Resend ID: ${result.id})`,
     };
   }
 }
