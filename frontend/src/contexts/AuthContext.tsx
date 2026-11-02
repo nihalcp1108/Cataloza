@@ -73,15 +73,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fetchCurrentUser();
   }, []);
 
-  const login = async (email: string, password: string): Promise<LoginResult> => {
-    const res = await api.post('/auth/login', { email, password });
+  const login = async (identifier: string, password: string): Promise<LoginResult> => {
+    const res = await api.post('/auth/login', {
+      identifier: identifier.trim(),
+      email: identifier.trim(),
+      username: identifier.trim(),
+      password,
+    });
     
-    // Check if 2FA OTP is required (e.g. for cpnihal35@gmail.com or unverified user)
-    if (res.data?.requiresOtp) {
+    // Check if 2FA OTP is required (e.g. for super_admin or unverified registration)
+    if (res.data?.requiresOtp || res.data?.requiresOTP) {
       return {
         requiresOtp: true,
         challengeId: res.data.data?.challengeId,
-        email: res.data.data?.email || email,
+        email: res.data.data?.email || identifier,
         message: res.data.message,
       };
     }
@@ -118,7 +123,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = async (data: any): Promise<RegisterResult> => {
     const res = await api.post('/auth/register', data);
-    if (res.data?.requiresOtp) {
+    if (res.data?.requiresOtp || res.data?.requiresOTP) {
       return {
         requiresOtp: true,
         challengeId: res.data.data?.challengeId,

@@ -70,6 +70,49 @@ export class AuthService {
   }
 
   /**
+   * Find user by email or username (name) case-insensitively
+   */
+  public static async findUserByIdentifier(identifier: string): Promise<IUser | null> {
+    const trimmed = (identifier || '').trim();
+    if (!trimmed) return null;
+    const normalizedEmail = trimmed.toLowerCase();
+
+    // 1. Check exact email first
+    let user = await User.findOne({ email: normalizedEmail });
+    if (user) return user;
+
+    // 2. Check name (username) case-insensitively
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    user = await User.findOne({ name: { $regex: new RegExp(`^${escaped}$`, 'i') } });
+    return user;
+  }
+
+  /**
+   * Authenticate user credentials (email or username + password)
+   * Validates account status and password hash
+   */
+  public static async authenticateCredentials(
+    identifier: string,
+    password: string
+  ): Promise<IUser> {
+    const user = await this.findUserByIdentifier(identifier);
+    if (!user) {
+      throw new Error('Invalid email or password');
+    }
+
+    if (!user.isActive) {
+      throw new Error('This account has been deactivated. Please contact support.');
+    }
+
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      throw new Error('Invalid email or password');
+    }
+
+    return user;
+  }
+
+  /**
    * Register customer with mandatory OTP email verification
    */
   public static async initiateRegistration(data: {
@@ -118,7 +161,8 @@ export class AuthService {
 
     // Generate secure 6-digit OTP
     const otpCode = crypto.randomInt(100000, 1000000).toString();
-    const otpHash = await bcrypt.hash(otpCode, 10);
+    const saltOtp = await bcrypt.genSalt(10);
+    const otpHash = await bcrypt.hash(otpCode, saltOtp);
     const challengeId = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
@@ -127,10 +171,10 @@ export class AuthService {
       await EmailService.sendVerificationOtp(normalizedEmail, user.name, otpCode);
     } catch (deliveryError: any) {
       console.error(`[Auth] Failed to dispatch registration OTP email to ${normalizedEmail}:`, deliveryError.message);
-      throw new Error(`Email delivery failed: ${deliveryError.message}. Please check SMTP configuration in backend/.env`);
+      throw new Error(`Email delivery failed: ${deliveryError.message}`);
     }
 
-    // Store challenge only after email was accepted by SMTP provider
+    // Store challenge only after email was accepted by email provider
     await OtpChallenge.create({
       challengeId,
       userId: user._id,
@@ -197,6 +241,20 @@ export class AuthService {
       throw new Error('Associated user account was not found.');
     }
 
+    if (!user.isActive) {
+      throw new Error('This account has been deactivated. Please contact support.');
+    }
+
+    // Role-based security validation
+    if (challenge.purpose === 'super_admin_2fa' && user.role !== 'super_admin') {
+      throw new Error('Access denied: Challenge does not belong to an authorized Super Administrator.');
+    }
+
+    // Regular admin accounts must NOT use OTP challenges to obtain tokens
+    if (user.role === 'shop_admin') {
+      throw new Error('Access denied: Administrator accounts must log in with password credentials.');
+    }
+
     user.isVerified = true;
     user.isActive = true;
     user.lastLogin = new Date();
@@ -219,6 +277,24 @@ export class AuthService {
       throw new Error('Invalid or expired verification session. Please initiate a new sign-in or registration.');
     }
 
+    const user = await User.findById(challenge.userId);
+    if (!user) {
+      throw new Error('Associated user account was not found.');
+    }
+
+    if (!user.isActive) {
+      throw new Error('This account has been deactivated. Please contact support.');
+    }
+
+    // Regular admin accounts must NOT resend OTPs
+    if (user.role === 'shop_admin') {
+      throw new Error('Access denied: Administrator accounts do not use OTP verification.');
+    }
+
+    if (challenge.purpose === 'super_admin_2fa' && user.role !== 'super_admin') {
+      throw new Error('Access denied: Challenge does not belong to a Super Administrator.');
+    }
+
     // 60-second cooldown
     const elapsedMs = Date.now() - new Date(challenge.lastSentAt).getTime();
     const cooldownMs = 60 * 1000;
@@ -231,7 +307,6 @@ export class AuthService {
       throw new Error('Maximum code resend limit reached for this session. Please initiate a new sign-in or registration.');
     }
 
-    const user = await User.findById(challenge.userId);
     const recipientName = user?.name || 'User';
 
     const newOtpCode = crypto.randomInt(100000, 1000000).toString();
@@ -310,26 +385,14 @@ export class AuthService {
     return { user, accessToken, refreshToken };
   }
 
+  /**
+   * Programmatic user login (email or username)
+   */
   public static async loginUser(
-    email: string,
+    identifier: string,
     password: string
   ): Promise<{ user: IUser; accessToken: string; refreshToken: string }> {
-    const normalizedEmail = email.toLowerCase().trim();
-
-    const user = await User.findOne({ email: normalizedEmail });
-    if (!user) {
-      throw new Error('Invalid email or password');
-    }
-
-    if (!user.isActive) {
-      throw new Error('This account has been deactivated. Please contact support.');
-    }
-
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      throw new Error('Invalid email or password');
-    }
-
+    const user = await this.authenticateCredentials(identifier, password);
     user.lastLogin = new Date();
     await user.save();
 
@@ -414,7 +477,7 @@ export class AuthService {
 
     await User.updateMany(
       { role: 'super_admin', email: { $ne: email } },
-      { $set: { role: 'shop_admin' } }
+      { $set: { role: 'shop_admin', isVerified: true } }
     );
 
     let superAdmin = await User.findOne({ email });

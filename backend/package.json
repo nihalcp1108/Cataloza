@@ -13,6 +13,7 @@
     "bootstrap:admin": "tsx scripts/bootstrapAdmin.ts",
     "reset:admin": "tsx scripts/bootstrapAdmin.ts --reset-password",
     "test:auth": "tsx scripts/verify-auth.ts",
+    "test:role-auth": "tsx scripts/verify-role-auth.ts",
     "seed:demo": "tsx scripts/seedDemo.ts",
     "lint": "tsc --noEmit"
   },

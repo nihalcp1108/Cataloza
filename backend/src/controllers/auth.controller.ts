@@ -7,7 +7,7 @@ import { AuthService } from '../services/auth.service';
 import { EmailService } from '../services/email.service';
 import { AuditService } from '../services/audit.service';
 import { AuthenticatedRequest } from '../types';
-import { User } from '../models/User';
+import { User, IUser } from '../models/User';
 import { OtpChallenge } from '../models/OtpChallenge';
 import { config } from '../config';
 
@@ -195,8 +195,87 @@ export class AuthController {
   }
 
   /**
+   * Helper: Dispatch Super Admin 2FA OTP code and create challenge
+   */
+  private static async dispatchSuperAdminOtp(req: Request, res: Response, user: IUser): Promise<void> {
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const recentOtpCount = await OtpChallenge.countDocuments({
+      userId: user._id,
+      createdAt: { $gte: fifteenMinutesAgo },
+    });
+
+    if (recentOtpCount >= 5) {
+      res.status(429).json({
+        success: false,
+        message: 'Too many verification code requests. Please wait 15 minutes before requesting a new code.',
+      });
+      return;
+    }
+
+    await OtpChallenge.updateMany({ userId: user._id, used: false }, { used: true });
+
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
+    const salt = await bcrypt.genSalt(10);
+    const otpHash = await bcrypt.hash(otpCode, salt);
+
+    const challengeId = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    try {
+      await EmailService.sendSuperAdminOtp(user.email, otpCode);
+    } catch (deliveryError: any) {
+      console.error('[Auth] Failed to dispatch Super Admin OTP email:', deliveryError.message);
+      res.status(502).json({
+        success: false,
+        message: `Email delivery failed: ${deliveryError.message}. Please check email service configuration.`,
+      });
+      return;
+    }
+
+    await OtpChallenge.create({
+      challengeId,
+      userId: user._id,
+      email: user.email,
+      otpHash,
+      purpose: 'super_admin_2fa',
+      expiresAt,
+      attempts: 0,
+      maxAttempts: 5,
+      resendCount: 1,
+      lastSentAt: new Date(),
+      used: false,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
+    await AuditService.logAction({
+      actorId: user._id.toString(),
+      actorRole: user.role,
+      action: 'SUPER_ADMIN_OTP_DISPATCHED',
+      targetEntity: 'User',
+      targetId: user._id.toString(),
+      metadata: { recipient: user.email },
+    });
+
+    res.status(200).json({
+      success: true,
+      requiresOtp: true,
+      requiresOTP: true,
+      message: `A 6-digit verification code has been sent to ${user.email}`,
+      data: {
+        challengeId,
+        email: user.email,
+        expiresInSeconds: 600,
+      },
+    });
+  }
+
+  /**
    * Unified login endpoint
-   * If cpnihal35@gmail.com logs in, delegates to two-step superAdminLogin flow
+   * Role-based login handling:
+   * - super_admin: Validates credentials, dispatches OTP email, returns requiresOtp: true (no tokens)
+   * - shop_admin: Validates credentials, issues JWT immediately, returns requiresOtp: false (no OTP)
+   * - customer: Validates credentials, checks verification status, issues JWT or dispatches reg OTP
    */
   public static async login(req: Request, res: Response): Promise<void> {
     try {
@@ -208,84 +287,127 @@ export class AuthController {
         return;
       }
 
-      const email = (req.body?.email || '').toLowerCase().trim();
+      const identifier = (req.body?.identifier || req.body?.email || req.body?.username || '').trim();
       const password = req.body?.password;
 
-      if (!email || !password) {
+      if (!identifier || !password) {
         res.status(400).json({
           success: false,
-          message: 'Email and password are required',
+          message: 'Email/username and password are required',
         });
         return;
       }
 
-      // If logging in as the authorized Super Admin, enforce two-step verification
-      if (email === AUTHORIZED_SUPER_ADMIN_EMAIL) {
-        return AuthController.superAdminLogin(req, res);
-      }
+      // 1. Authenticate user credentials securely
+      const user = await AuthService.authenticateCredentials(identifier, password);
 
-      const { user, accessToken, refreshToken } = await AuthService.loginUser(email, password);
-
-      // Prevent non-authorized accounts from possessing or using super_admin role
-      if (user.role === 'super_admin' && user.email !== AUTHORIZED_SUPER_ADMIN_EMAIL) {
-        res.status(403).json({
-          success: false,
-          message: 'Access denied: unauthorized administrator credential',
-        });
-        return;
-      }
-
-      // Check if user is unverified
-      if (!user.isVerified && user.role !== 'super_admin') {
-        const otpCode = crypto.randomInt(100000, 1000000).toString();
-        const otpHash = await bcrypt.hash(otpCode, 10);
-        const challengeId = crypto.randomBytes(32).toString('hex');
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-        try {
-          await EmailService.sendVerificationOtp(user.email, user.name, otpCode);
-        } catch (mailErr: any) {
-          console.error(`[Auth] Failed to dispatch login verification OTP to ${user.email}:`, mailErr.message);
+      // 2. Role-based execution based STRICTLY on database user.role (never client input)
+      if (user.role === 'super_admin') {
+        if (user.email !== AUTHORIZED_SUPER_ADMIN_EMAIL) {
+          res.status(403).json({
+            success: false,
+            message: 'Access denied: unauthorized administrator credential',
+          });
+          return;
         }
 
-        await OtpChallenge.create({
-          challengeId,
-          userId: user._id,
-          email: user.email,
-          otpHash,
-          purpose: 'registration',
-          expiresAt,
-          attempts: 0,
-          maxAttempts: 5,
-          resendCount: 1,
-          lastSentAt: new Date(),
-          used: false,
-          ipAddress: req.ip,
-          userAgent: req.headers['user-agent'],
-        });
+        return AuthController.dispatchSuperAdminOtp(req, res, user);
+      }
+
+      if (user.role === 'shop_admin') {
+        // Dealer / Admin: Immediate direct login, NO OTP required, NO OTP email sent
+        if (!user.isVerified) {
+          user.isVerified = true;
+        }
+        user.lastLogin = new Date();
+        await user.save();
+
+        const accessToken = AuthService.generateAccessToken(user);
+        const refreshToken = AuthService.generateRefreshToken(user);
+        AuthService.setAuthCookies(res, accessToken, refreshToken);
 
         res.status(200).json({
           success: true,
-          requiresOtp: true,
-          message: 'Your email address is not yet verified. A 6-digit verification code has been dispatched to your email.',
+          requiresOtp: false,
+          requiresOTP: false,
+          message: 'Login successful',
           data: {
-            challengeId,
-            email: user.email,
-            expiresInSeconds: 600,
+            user,
+            accessToken,
           },
         });
         return;
       }
 
-      AuthService.setAuthCookies(res, accessToken, refreshToken);
+      if (user.role === 'customer') {
+        // Customer: Check if unverified
+        if (!user.isVerified) {
+          const otpCode = crypto.randomInt(100000, 1000000).toString();
+          const salt = await bcrypt.genSalt(10);
+          const otpHash = await bcrypt.hash(otpCode, salt);
+          const challengeId = crypto.randomBytes(32).toString('hex');
+          const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-      res.status(200).json({
-        success: true,
-        message: 'Login successful',
-        data: {
-          user,
-          accessToken,
-        },
+          try {
+            await EmailService.sendVerificationOtp(user.email, user.name, otpCode);
+          } catch (mailErr: any) {
+            console.error(`[Auth] Failed to dispatch login verification OTP to ${user.email}:`, mailErr.message);
+          }
+
+          await OtpChallenge.create({
+            challengeId,
+            userId: user._id,
+            email: user.email,
+            otpHash,
+            purpose: 'registration',
+            expiresAt,
+            attempts: 0,
+            maxAttempts: 5,
+            resendCount: 1,
+            lastSentAt: new Date(),
+            used: false,
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'],
+          });
+
+          res.status(200).json({
+            success: true,
+            requiresOtp: true,
+            requiresOTP: true,
+            message: 'Your email address is not yet verified. A 6-digit verification code has been dispatched to your email.',
+            data: {
+              challengeId,
+              email: user.email,
+              expiresInSeconds: 600,
+            },
+          });
+          return;
+        }
+
+        user.lastLogin = new Date();
+        await user.save();
+
+        const accessToken = AuthService.generateAccessToken(user);
+        const refreshToken = AuthService.generateRefreshToken(user);
+        AuthService.setAuthCookies(res, accessToken, refreshToken);
+
+        res.status(200).json({
+          success: true,
+          requiresOtp: false,
+          requiresOTP: false,
+          message: 'Login successful',
+          data: {
+            user,
+            accessToken,
+          },
+        });
+        return;
+      }
+
+      // Default fallback
+      res.status(403).json({
+        success: false,
+        message: 'Invalid account configuration',
       });
     } catch (error: any) {
       if (isDatabaseError(error)) {
@@ -316,30 +438,22 @@ export class AuthController {
         return;
       }
 
-      const email = (req.body?.email || '').toLowerCase().trim();
+      const identifier = (req.body?.identifier || req.body?.email || req.body?.username || '').trim();
       const password = req.body?.password;
 
-      if (!email || !password) {
+      if (!identifier || !password) {
         res.status(400).json({
           success: false,
-          message: 'Email and password are required',
+          message: 'Email/username and password are required',
         });
         return;
       }
 
-      if (email !== AUTHORIZED_SUPER_ADMIN_EMAIL) {
-        res.status(401).json({
-          success: false,
-          message: 'Invalid email or password',
-        });
-        return;
-      }
-
-      let user = await User.findOne({ email: AUTHORIZED_SUPER_ADMIN_EMAIL });
-      if (!user && config.superAdmin.password) {
+      let user = await AuthService.findUserByIdentifier(identifier);
+      if (!user && identifier.toLowerCase() === AUTHORIZED_SUPER_ADMIN_EMAIL && config.superAdmin.password) {
         try {
           await AuthService.bootstrapSuperAdmin({ forceReset: false });
-          user = await User.findOne({ email: AUTHORIZED_SUPER_ADMIN_EMAIL });
+          user = await AuthService.findUserByIdentifier(identifier);
         } catch (err: any) {
           console.warn('[Auth] On-demand Super Admin bootstrap warning:', err.message);
         }
@@ -353,16 +467,20 @@ export class AuthController {
         return;
       }
 
-      if (user.role !== 'super_admin') {
-        user.role = 'super_admin';
-        user.isActive = true;
-        user.isVerified = true;
-        await user.save();
+      if (user.role !== 'super_admin' || user.email !== AUTHORIZED_SUPER_ADMIN_EMAIL) {
+        res.status(403).json({
+          success: false,
+          message: 'Access denied: only Super Admin accounts may access this portal',
+        });
+        return;
       }
 
       if (!user.isActive) {
-        user.isActive = true;
-        await user.save();
+        res.status(403).json({
+          success: false,
+          message: 'This account has been deactivated. Please contact support.',
+        });
+        return;
       }
 
       const isMatch = await user.comparePassword(password);
@@ -374,75 +492,7 @@ export class AuthController {
         return;
       }
 
-      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-      const recentOtpCount = await OtpChallenge.countDocuments({
-        userId: user._id,
-        createdAt: { $gte: fifteenMinutesAgo },
-      });
-
-      if (recentOtpCount >= 5) {
-        res.status(429).json({
-          success: false,
-          message: 'Too many verification code requests. Please wait 15 minutes before requesting a new code.',
-        });
-        return;
-      }
-
-      await OtpChallenge.updateMany({ userId: user._id, used: false }, { used: true });
-
-      const otpCode = crypto.randomInt(100000, 1000000).toString();
-      const salt = await bcrypt.genSalt(10);
-      const otpHash = await bcrypt.hash(otpCode, salt);
-
-      const challengeId = crypto.randomBytes(32).toString('hex');
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-      try {
-        await EmailService.sendSuperAdminOtp(AUTHORIZED_SUPER_ADMIN_EMAIL, otpCode);
-      } catch (deliveryError: any) {
-        console.error('[Auth] Failed to dispatch Super Admin OTP email:', deliveryError.message);
-        res.status(502).json({
-          success: false,
-          message: `Email delivery failed: ${deliveryError.message}. Please verify SMTP settings in backend/.env`,
-        });
-        return;
-      }
-
-      await OtpChallenge.create({
-        challengeId,
-        userId: user._id,
-        email: AUTHORIZED_SUPER_ADMIN_EMAIL,
-        otpHash,
-        purpose: 'super_admin_2fa',
-        expiresAt,
-        attempts: 0,
-        maxAttempts: 5,
-        resendCount: 1,
-        lastSentAt: new Date(),
-        used: false,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-      });
-
-      await AuditService.logAction({
-        actorId: user._id.toString(),
-        actorRole: user.role,
-        action: 'SUPER_ADMIN_OTP_DISPATCHED',
-        targetEntity: 'User',
-        targetId: user._id.toString(),
-        metadata: { recipient: AUTHORIZED_SUPER_ADMIN_EMAIL },
-      });
-
-      res.status(200).json({
-        success: true,
-        requiresOtp: true,
-        message: `A 6-digit verification code has been sent to ${AUTHORIZED_SUPER_ADMIN_EMAIL}`,
-        data: {
-          challengeId,
-          email: AUTHORIZED_SUPER_ADMIN_EMAIL,
-          expiresInSeconds: 600,
-        },
-      });
+      return AuthController.dispatchSuperAdminOtp(req, res, user);
     } catch (error: any) {
       if (isDatabaseError(error)) {
         res.status(503).json({
@@ -461,14 +511,80 @@ export class AuthController {
    * Super Admin OTP Verification (delegates to verifyOtp)
    */
   public static async superAdminVerifyOtp(req: Request, res: Response): Promise<void> {
-    return AuthController.verifyOtp(req, res);
+    try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      const { challengeId, otp } = req.body;
+      if (!challengeId || !otp) {
+        res.status(400).json({
+          success: false,
+          message: 'Challenge ID and 6-digit OTP code are required',
+        });
+        return;
+      }
+
+      const challenge = await OtpChallenge.findOne({ challengeId, used: false });
+      if (!challenge || challenge.purpose !== 'super_admin_2fa') {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid or expired Super Admin verification session. Please log in again.',
+        });
+        return;
+      }
+
+      return AuthController.verifyOtp(req, res);
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Verification failed',
+      });
+    }
   }
 
   /**
    * Super Admin OTP Resend (delegates to resendOtp)
    */
   public static async superAdminResendOtp(req: Request, res: Response): Promise<void> {
-    return AuthController.resendOtp(req, res);
+    try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      const { challengeId } = req.body;
+      if (!challengeId) {
+        res.status(400).json({
+          success: false,
+          message: 'Challenge ID is required',
+        });
+        return;
+      }
+
+      const challenge = await OtpChallenge.findOne({ challengeId, used: false });
+      if (!challenge || challenge.purpose !== 'super_admin_2fa') {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid or expired Super Admin verification session.',
+        });
+        return;
+      }
+
+      return AuthController.resendOtp(req, res);
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to resend code',
+      });
+    }
   }
 
   /**

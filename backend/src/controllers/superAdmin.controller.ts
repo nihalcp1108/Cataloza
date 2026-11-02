@@ -539,6 +539,7 @@ export class SuperAdminController {
           adminUser.assignedShopIds.push(shop._id);
           if (adminUser.role === 'customer') {
             adminUser.role = 'shop_admin';
+            adminUser.isVerified = true;
           }
           await adminUser.save();
         }
@@ -554,6 +555,7 @@ export class SuperAdminController {
           role: 'shop_admin',
           assignedShopIds: [shop._id],
           isActive: true,
+          isVerified: true,
         });
       }
 
@@ -1479,6 +1481,7 @@ export class SuperAdminController {
         }
 
         user.role = 'shop_admin';
+        user.isVerified = true;
         user.name = name || user.name;
         user.phone = phone || user.phone;
         assignedIds.forEach((id) => {
@@ -1502,6 +1505,7 @@ export class SuperAdminController {
           role: 'shop_admin',
           assignedShopIds: assignedIds,
           isActive: true,
+          isVerified: true,
           mustChangePassword: !password,
           invitationToken,
           invitationExpires,

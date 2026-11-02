@@ -16,8 +16,13 @@ export const registerSchema = z.object({
 });
 
 export const loginSchema = z.object({
-  email: z.string().email('Invalid email address').toLowerCase().trim(),
+  email: z.string().min(1, 'Email or username is required').trim().optional(),
+  username: z.string().min(1).trim().optional(),
+  identifier: z.string().min(1).trim().optional(),
   password: z.string().min(1, 'Password is required'),
+}).refine((data) => Boolean(data.email || data.username || data.identifier), {
+  message: 'Email or username is required',
+  path: ['email'],
 });
 
 export const forgotPasswordSchema = z.object({
@@ -51,8 +56,13 @@ export const changePasswordSchema = z.object({
 });
 
 export const superAdminLoginSchema = z.object({
-  email: z.string().email('Invalid email address').toLowerCase().trim(),
+  email: z.string().min(1, 'Email or username is required').trim().optional(),
+  username: z.string().min(1).trim().optional(),
+  identifier: z.string().min(1).trim().optional(),
   password: z.string().min(1, 'Password is required'),
+}).refine((data) => Boolean(data.email || data.username || data.identifier), {
+  message: 'Email or username is required',
+  path: ['email'],
 });
 
 export const verifyOtpSchema = z.object({

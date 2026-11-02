@@ -23,7 +23,7 @@ import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 
 const loginSchema = z.object({
-  email: z.string().email('Please enter a valid email address').toLowerCase().trim(),
+  email: z.string().min(1, 'Please enter your email or username').trim(),
   password: z.string().min(1, 'Password is required'),
 });
 
@@ -366,7 +366,7 @@ export const LoginPage: React.FC = () => {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                    Account Email
+                    Email or Username
                   </label>
                   {import.meta.env.DEV && (
                     <button
@@ -376,15 +376,15 @@ export const LoginPage: React.FC = () => {
                       }}
                       className="text-[11px] font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
                     >
-                      Fill Admin Email
+                      Fill Super Admin
                     </button>
                   )}
                 </div>
                 <div className="relative">
                   <input
-                    type="email"
-                    autoComplete="email"
-                    placeholder="e.g. cpnihal35@gmail.com"
+                    type="text"
+                    autoComplete="username"
+                    placeholder="e.g. cpnihal35@gmail.com or username"
                     {...register('email')}
                     className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                   />
