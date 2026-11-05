@@ -19,6 +19,7 @@ export interface IUser {
   role: UserRole;
   assignedShopIds?: any[];
   isActive: boolean;
+  isDemo?: boolean;
   mustChangePassword?: boolean;
   lastLogin?: string;
   invitationToken?: string;
@@ -58,6 +59,7 @@ export interface IShop {
   name: string;
   businessName?: string;
   slug: string;
+  isDemo?: boolean;
   description?: string;
   ownerName?: string;
   businessCategory?: string;

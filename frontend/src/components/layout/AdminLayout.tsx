@@ -132,6 +132,17 @@ export const AdminLayout: React.FC = () => {
           </button>
         </div>
 
+        {/* Demo Mode Sidebar Indicator */}
+        {(user.isDemo || shop?.isDemo) && (
+          <div className="mx-3 mt-3 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-amber-300">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+              <span className="text-[11px] font-bold uppercase tracking-wider">Demo Mode</span>
+            </div>
+            <span className="text-[10px] text-amber-400/80 font-medium">Showcase</span>
+          </div>
+        )}
+
         {/* Navigation links */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {navigation.map((item) => {
@@ -220,6 +231,38 @@ export const AdminLayout: React.FC = () => {
 
         {/* Dynamic Nested Page Content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+          {(user.isDemo || shop?.isDemo) && (
+            <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-sm">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 font-bold">
+                  ⚡
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-amber-600">
+                      Cataloza Demonstration Environment
+                    </h3>
+                    <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-semibold">
+                      Live Showcase
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    You are exploring the Dealer Admin dashboard with simulated products and orders. Real payments and destructive settings are disabled.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Link
+                  to={shopSlug ? `/${shopSlug}` : '/cataloza-demo-store'}
+                  target="_blank"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-sm shadow-amber-600/20"
+                >
+                  <span>Preview Demo Storefront</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

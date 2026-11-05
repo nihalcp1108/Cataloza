@@ -33,7 +33,7 @@ export const authenticate = async (
     const decoded = jwt.verify(token, config.jwt.accessSecret) as IUserPayload;
 
     // Verify user exists and is active
-    const user = await User.findById(decoded.userId).select('name email role isActive assignedShopIds tokenVersion');
+    const user = await User.findById(decoded.userId).select('name email role isActive assignedShopIds tokenVersion isDemo');
     if (!user || !user.isActive) {
       res.status(401).json({
         success: false,
@@ -59,6 +59,7 @@ export const authenticate = async (
       role: user.role,
       assignedShopIds: user.assignedShopIds.map((id) => id.toString()),
       tokenVersion: user.tokenVersion || 0,
+      isDemo: Boolean(user.isDemo),
     };
 
     next();
@@ -96,7 +97,7 @@ export const optionalAuthenticate = async (
     if (token) {
       try {
         const decoded = jwt.verify(token, config.jwt.accessSecret) as IUserPayload;
-        const user = await User.findById(decoded.userId).select('name email role isActive assignedShopIds');
+        const user = await User.findById(decoded.userId).select('name email role isActive assignedShopIds isDemo');
         if (user && user.isActive) {
           req.user = {
             userId: user._id.toString(),
@@ -104,6 +105,7 @@ export const optionalAuthenticate = async (
             name: user.name,
             role: user.role,
             assignedShopIds: user.assignedShopIds.map((id) => id.toString()),
+            isDemo: Boolean(user.isDemo),
           };
         }
       } catch {

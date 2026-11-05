@@ -335,7 +335,45 @@ export class AuthController {
       }
 
       if (user.role === 'shop_admin') {
-        // Dealer / Admin: Requires 2FA email OTP verification before tokens are issued
+        const isDesignatedDemoAdmin = Boolean(
+          user.isDemo &&
+          user.email === config.demoAdmin.email.toLowerCase().trim() &&
+          config.demoAdmin.enabled
+        );
+
+        // DEMO ADMIN: Direct authentication without email OTP verification
+        if (isDesignatedDemoAdmin) {
+          user.lastLogin = new Date();
+          await user.save();
+
+          const accessToken = AuthService.generateAccessToken(user);
+          const refreshToken = AuthService.generateRefreshToken(user);
+          AuthService.setAuthCookies(res, accessToken, refreshToken);
+
+          await AuditService.logAction({
+            actorId: user._id.toString(),
+            actorRole: user.role,
+            shopId: user.assignedShopIds && user.assignedShopIds.length > 0 ? user.assignedShopIds[0].toString() : undefined,
+            action: 'DEMO_ADMIN_LOGIN_SUCCESS',
+            targetEntity: 'User',
+            targetId: user._id.toString(),
+          });
+
+          res.status(200).json({
+            success: true,
+            message: 'Demo Administrator authenticated successfully. Welcome to Cataloza Demo Mode!',
+            requiresOtp: false,
+            requiresOTP: false,
+            isDemo: true,
+            data: {
+              user,
+              accessToken,
+            },
+          });
+          return;
+        }
+
+        // Regular Dealer / Admin: Requires 2FA email OTP verification before tokens are issued
         return AuthController.dispatchLoginOtp(req, res, user, 'login_2fa');
       }
 

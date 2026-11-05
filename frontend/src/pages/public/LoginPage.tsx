@@ -160,7 +160,11 @@ export const LoginPage: React.FC = () => {
     } else if (user.role === 'super_admin') {
       navigate('/superadmin/dashboard', { replace: true });
     } else if (user.role === 'shop_admin') {
-      navigate('/admin/dashboard', { replace: true });
+      if (user.isDemo) {
+        navigate('/cataloza-demo-store', { replace: true });
+      } else {
+        navigate('/admin/dashboard', { replace: true });
+      }
     } else {
       navigate('/my-account/orders', { replace: true });
     }
