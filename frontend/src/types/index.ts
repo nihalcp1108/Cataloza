@@ -17,6 +17,7 @@ export interface IUser {
   email: string;
   phone?: string;
   role: UserRole;
+  isDemo?: boolean;
   assignedShopIds?: any[];
   isActive: boolean;
   mustChangePassword?: boolean;
@@ -77,6 +78,7 @@ export interface IShop {
   currency?: string;
   currencySymbol?: string;
   status: 'active' | 'inactive' | 'suspended';
+  isDemo?: boolean;
   productCount?: number;
   orderCount?: number;
   admins?: any[];

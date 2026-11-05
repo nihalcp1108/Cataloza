@@ -15,6 +15,7 @@ import {
   ArrowLeft,
   KeyRound,
   CheckCircle2,
+  Sparkles,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
@@ -42,7 +43,7 @@ const maskEmail = (email: string): string => {
 };
 
 export const LoginPage: React.FC = () => {
-  const { login, verifySuperAdminOtp, resendSuperAdminOtp } = useAuth();
+  const { login, exploreDemo, verifySuperAdminOtp, resendSuperAdminOtp } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -52,6 +53,7 @@ export const LoginPage: React.FC = () => {
   // Step 1: Login states
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isExploringDemo, setIsExploringDemo] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
@@ -149,6 +151,24 @@ export const LoginPage: React.FC = () => {
       }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Dedicated one-click Explore Demo session authentication
+  const handleExploreDemo = async () => {
+    setIsExploringDemo(true);
+    setErrorMessage('');
+    try {
+      const result = await exploreDemo();
+      if (result.user) {
+        toast.success('Welcome to Cataloza Demo Store!');
+        navigate('/admin/dashboard', { replace: true });
+      }
+    } catch (err: any) {
+      const serverMessage = err.response?.data?.message;
+      setErrorMessage(serverMessage || 'Failed to initialize demo session. Please try again.');
+    } finally {
+      setIsExploringDemo(false);
     }
   };
 
@@ -446,7 +466,7 @@ export const LoginPage: React.FC = () => {
 
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || isExploringDemo}
                 className="w-full py-3.5 px-4 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {isSubmitting ? (
@@ -455,6 +475,28 @@ export const LoginPage: React.FC = () => {
                   <>
                     <span>Sign In</span>
                     <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+
+              <div className="relative flex py-1 items-center">
+                <div className="flex-grow border-t border-slate-800"></div>
+                <span className="flex-shrink mx-3 text-[11px] uppercase tracking-wider text-slate-500 font-medium">Or</span>
+                <div className="flex-grow border-t border-slate-800"></div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExploreDemo}
+                disabled={isExploringDemo || isSubmitting}
+                className="w-full py-3.5 px-4 rounded-xl font-bold text-sm text-slate-200 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-slate-600 shadow-md transition-all flex items-center justify-center gap-2 group disabled:opacity-50"
+              >
+                {isExploringDemo ? (
+                  <div className="w-5 h-5 border-2 border-slate-400 border-t-white rounded-full animate-spin"></div>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                    <span>Explore Demo</span>
                   </>
                 )}
               </button>

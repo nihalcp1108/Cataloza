@@ -20,6 +20,7 @@ const router = Router();
 // Standard customer and admin authentication
 router.post('/register', authLimiter, validate(registerSchema), AuthController.register);
 router.post('/login', authLimiter, validate(loginSchema), AuthController.login);
+router.post('/demo-session', authLimiter, AuthController.demoSession);
 router.post('/verify-otp', authLimiter, validate(verifyOtpSchema), AuthController.verifyOtp);
 router.post('/resend-otp', authLimiter, validate(resendOtpSchema), AuthController.resendOtp);
 router.post('/logout', AuthController.logout);

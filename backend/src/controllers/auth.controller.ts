@@ -335,7 +335,45 @@ export class AuthController {
       }
 
       if (user.role === 'shop_admin') {
-        // Dealer / Admin: Requires 2FA email OTP verification before tokens are issued
+        const isDesignatedDemoAdmin = Boolean(
+          user.isDemo &&
+          user.email === config.demoAdmin.email.toLowerCase().trim() &&
+          config.demoAdmin.enabled
+        );
+
+        // DEMO ADMIN: Direct authentication without email OTP verification
+        if (isDesignatedDemoAdmin) {
+          user.lastLogin = new Date();
+          await user.save();
+
+          const accessToken = AuthService.generateAccessToken(user);
+          const refreshToken = AuthService.generateRefreshToken(user);
+          AuthService.setAuthCookies(res, accessToken, refreshToken);
+
+          await AuditService.logAction({
+            actorId: user._id.toString(),
+            actorRole: user.role,
+            shopId: user.assignedShopIds && user.assignedShopIds.length > 0 ? user.assignedShopIds[0].toString() : undefined,
+            action: 'DEMO_ADMIN_LOGIN_SUCCESS',
+            targetEntity: 'User',
+            targetId: user._id.toString(),
+          });
+
+          res.status(200).json({
+            success: true,
+            message: 'Demo Administrator authenticated successfully. Welcome to Cataloza Demo Mode!',
+            requiresOtp: false,
+            requiresOTP: false,
+            isDemo: true,
+            data: {
+              user,
+              accessToken,
+            },
+          });
+          return;
+        }
+
+        // Regular Dealer / Admin: Requires 2FA email OTP verification before tokens are issued
         return AuthController.dispatchLoginOtp(req, res, user, 'login_2fa');
       }
 
@@ -586,6 +624,90 @@ export class AuthController {
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to resend code',
+      });
+    }
+  }
+
+  /**
+   * Dedicated secure endpoint for "Explore Demo":
+   * Authenticates the designated Demo Admin directly without exposing passwords in client code.
+   * Rate-limited and server-verified.
+   */
+  public static async demoSession(req: Request, res: Response): Promise<void> {
+    try {
+      if (isDatabaseUnavailable()) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      if (!config.demoAdmin.enabled) {
+        res.status(403).json({
+          success: false,
+          message: 'Demonstration access is currently disabled.',
+        });
+        return;
+      }
+
+      const demoEmail = config.demoAdmin.email.toLowerCase().trim();
+      const demoUser = await User.findOne({
+        email: demoEmail,
+        isDemo: true,
+        role: 'shop_admin',
+        isActive: true,
+      });
+
+      if (!demoUser) {
+        res.status(404).json({
+          success: false,
+          message: 'Demo administrator account not found. Please ensure the demo environment is initialized.',
+        });
+        return;
+      }
+
+      demoUser.lastLogin = new Date();
+      await demoUser.save();
+
+      const accessToken = AuthService.generateAccessToken(demoUser);
+      const refreshToken = AuthService.generateRefreshToken(demoUser);
+      AuthService.setAuthCookies(res, accessToken, refreshToken);
+
+      await AuditService.logAction({
+        actorId: demoUser._id.toString(),
+        actorRole: demoUser.role,
+        shopId: demoUser.assignedShopIds && demoUser.assignedShopIds.length > 0 ? demoUser.assignedShopIds[0].toString() : undefined,
+        action: 'DEMO_EXPLORE_SESSION_CREATED',
+        targetEntity: 'User',
+        targetId: demoUser._id.toString(),
+        metadata: { ip: req.ip },
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'Demo session initialized successfully. Welcome to Cataloza Demo Mode!',
+        requiresOtp: false,
+        requiresOTP: false,
+        isDemo: true,
+        data: {
+          user: demoUser,
+          accessToken,
+        },
+      });
+    } catch (error: any) {
+      if (isDatabaseError(error)) {
+        res.status(503).json({
+          success: false,
+          message: 'Database service unavailable. Please ensure MongoDB is connected.',
+        });
+        return;
+      }
+
+      console.error('[Auth] Error generating demo session:', error.message);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to create demonstration session. Please try again.',
       });
     }
   }

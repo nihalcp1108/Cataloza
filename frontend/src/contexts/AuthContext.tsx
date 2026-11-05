@@ -23,6 +23,7 @@ interface AuthContextType {
   user: IUser | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<LoginResult>;
+  exploreDemo: () => Promise<LoginResult>;
   verifyOtp: (challengeId: string, otp: string) => Promise<IUser>;
   resendOtp: (challengeId: string) => Promise<void>;
   verifySuperAdminOtp: (challengeId: string, otp: string) => Promise<IUser>;
@@ -93,6 +94,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }
 
+    const { user: loggedInUser, accessToken } = res.data.data;
+    if (accessToken) {
+      localStorage.setItem('wf_access_token', accessToken);
+    }
+    setUser(loggedInUser);
+    return { user: loggedInUser };
+  };
+
+  const exploreDemo = async (): Promise<LoginResult> => {
+    const res = await api.post('/auth/demo-session');
     const { user: loggedInUser, accessToken } = res.data.data;
     if (accessToken) {
       localStorage.setItem('wf_access_token', accessToken);
@@ -190,6 +201,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         isLoading,
         login,
+        exploreDemo,
         verifyOtp,
         resendOtp,
         verifySuperAdminOtp,

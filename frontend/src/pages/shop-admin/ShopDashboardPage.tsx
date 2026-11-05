@@ -64,6 +64,7 @@ export const ShopDashboardPage: React.FC = () => {
   }
 
   const { metrics, recentOrders, recentCustomers, topProducts, shop } = data;
+  const isDemo = Boolean(shop?.isDemo || shop?.slug === 'cataloza-demo-store');
   const publicShopUrl = shop?.slug ? `${window.location.origin}/${shop.slug}` : '';
 
   return (
@@ -74,6 +75,11 @@ export const ShopDashboardPage: React.FC = () => {
           <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
             <Store className="w-6 h-6 text-blue-600" />
             {shop?.name || 'Shop'} Dashboard
+            {isDemo && (
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                Demo
+              </span>
+            )}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
             Real-time wholesale analytics, order processing velocity, customer directory, and catalogue overview.
@@ -81,6 +87,19 @@ export const ShopDashboardPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {isDemo && (
+            <a
+              href={`${window.location.origin}/cataloza-demo-store`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>View Demo Store</span>
+              <ExternalLink className="w-3.5 h-3.5 text-blue-200" />
+            </a>
+          )}
+
           <button
             type="button"
             onClick={handleCopyShopLink}
@@ -90,7 +109,7 @@ export const ShopDashboardPage: React.FC = () => {
             <span>{copiedLink ? 'Link Copied' : 'Copy Shop Link'}</span>
           </button>
 
-          {publicShopUrl && (
+          {!isDemo && publicShopUrl && (
             <a
               href={publicShopUrl}
               target="_blank"
@@ -114,6 +133,38 @@ export const ShopDashboardPage: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {/* Demo Showcase Notice Banner */}
+      {isDemo && (
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-slate-200 shadow-lg shadow-indigo-950/20">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300 shrink-0 mt-0.5 sm:mt-0">
+              <Sparkles className="w-5 h-5 text-amber-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-bold text-white tracking-tight">Cataloza Demo Admin Portal</span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                  Interactive Showcase
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Explore real-time wholesale analytics, manage catalogue products, and preview live customer purchasing.
+              </p>
+            </div>
+          </div>
+          <a
+            href={`${window.location.origin}/cataloza-demo-store`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all shrink-0 cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            <span>View Demo Store</span>
+            <ExternalLink className="w-3.5 h-3.5 text-blue-200" />
+          </a>
+        </div>
+      )}
 
       {/* Primary KPI Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">

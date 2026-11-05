@@ -2,9 +2,11 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { config } from '../src/config';
 import { User } from '../src/models/User';
+import { Shop } from '../src/models/Shop';
 import { OtpChallenge } from '../src/models/OtpChallenge';
 import { AuthService } from '../src/services/auth.service';
 import { AuthController } from '../src/controllers/auth.controller';
+import { ShopAdminController } from '../src/controllers/shopAdmin.controller';
 import { EmailService } from '../src/services/email.service';
 
 async function runTests() {
@@ -401,6 +403,110 @@ async function runTests() {
     assert(unverifiedCustCtx.getData()?.requiresOtp === true, 'Unverified customer requiresOtp is TRUE');
     assert(Boolean(unverifiedCustCtx.getData()?.data?.challengeId), 'Unverified customer receives registration challengeId');
     assert(sentEmails.customerOtps.length === 1, 'EmailService.sendVerificationOtp sent to unverified customer');
+
+    // -------------------------------------------------------------
+    // Test 11: Dedicated Demo Session Endpoint (Explore Demo)
+    // -------------------------------------------------------------
+    console.log('\n--- Test 11: Dedicated Demo Session Endpoint (Explore Demo) ---');
+    sentEmails.adminOtps = [];
+    const demoSessionCtx = mockReqRes({});
+    await AuthController.demoSession(demoSessionCtx.req, demoSessionCtx.res);
+
+    assert(demoSessionCtx.getStatus() === 200, 'Demo session endpoint returns HTTP 200');
+    assert(demoSessionCtx.getData()?.success === true, 'Demo session success is true');
+    assert(Boolean(demoSessionCtx.getData()?.data?.accessToken), 'Demo session returns valid accessToken');
+    assert(demoSessionCtx.getData()?.data?.user?.email === 'demo@gmail.com', 'Demo user email is demo@gmail.com');
+    assert(demoSessionCtx.getData()?.data?.user?.isDemo === true, 'Demo user has isDemo === true');
+    assert(demoSessionCtx.getData()?.data?.user?.role === 'shop_admin', 'Demo user role is shop_admin');
+    assert(sentEmails.adminOtps.length === 0, 'No OTP email was dispatched for Explore Demo');
+    assert(demoSessionCtx.getCookies().some(c => c.name === 'access_token'), 'Session cookie access_token was set');
+
+    // -------------------------------------------------------------
+    // Test 12: Direct Credential Login for Demo Admin
+    // -------------------------------------------------------------
+    console.log('\n--- Test 12: Direct Credential Login for Demo Admin ---');
+    sentEmails.adminOtps = [];
+    const demoCredLoginCtx = mockReqRes({ email: 'demo@gmail.com', password: '123456789' });
+    await AuthController.login(demoCredLoginCtx.req, demoCredLoginCtx.res);
+
+    assert(demoCredLoginCtx.getStatus() === 200, 'Demo credential login returns HTTP 200');
+    assert(demoCredLoginCtx.getData()?.requiresOtp === false, 'Demo credential login requiresOtp is FALSE (OTP bypassed)');
+    assert(Boolean(demoCredLoginCtx.getData()?.data?.accessToken), 'Demo credential login returns accessToken immediately');
+    assert(demoCredLoginCtx.getData()?.data?.user?.isDemo === true, 'Demo credential user has isDemo === true');
+    assert(sentEmails.adminOtps.length === 0, 'No OTP email was dispatched for demo credential login');
+
+    // -------------------------------------------------------------
+    // Test 13: Demo Security Isolation (Password & Email Lock)
+    // -------------------------------------------------------------
+    console.log('\n--- Test 13: Demo Security Isolation (Password & Email Lock) ---');
+    const demoUser = await User.findOne({ email: 'demo@gmail.com' });
+    assert(Boolean(demoUser && demoUser.isDemo), 'Server-verified demo user exists in database');
+
+    const demoReq: any = {
+      user: {
+        userId: demoUser!._id.toString(),
+        role: demoUser!.role,
+        isDemo: true,
+        assignedShopIds: demoUser!.assignedShopIds,
+      },
+      body: {
+        currentPassword: '123456789',
+        newPassword: 'HackedPassword999!',
+        confirmPassword: 'HackedPassword999!',
+      },
+    };
+    let passChangeStatus = 200;
+    let passChangeData: any = null;
+    const demoRes: any = {
+      status(code: number) {
+        passChangeStatus = code;
+        return this;
+      },
+      json(data: any) {
+        passChangeData = data;
+        return this;
+      },
+    };
+    await ShopAdminController.changeAccountPassword(demoReq, demoRes);
+    assert(passChangeStatus === 403, 'Demo Admin password modification returns HTTP 403 Forbidden');
+    assert(passChangeData?.message?.includes('Password modification is disabled in Demo Mode'), 'Descriptive forbidden message returned for password change');
+
+    // Test email change restriction
+    let emailChangeStatus = 200;
+    let emailChangeData: any = null;
+    const demoEmailRes: any = {
+      status(code: number) {
+        emailChangeStatus = code;
+        return this;
+      },
+      json(data: any) {
+        emailChangeData = data;
+        return this;
+      },
+    };
+    const demoEmailReq: any = {
+      user: {
+        userId: demoUser!._id.toString(),
+        role: demoUser!.role,
+        isDemo: true,
+        assignedShopIds: demoUser!.assignedShopIds,
+      },
+      body: {
+        name: 'Demo Admin Changed',
+        email: 'attacker@evil.com',
+      },
+    };
+    await ShopAdminController.updateAccountProfile(demoEmailReq, demoEmailRes);
+    assert(emailChangeStatus === 403, 'Demo Admin email alteration returns HTTP 403 Forbidden');
+
+    // -------------------------------------------------------------
+    // Test 14: Demo Shop Existence, Products, and Metrics
+    // -------------------------------------------------------------
+    console.log('\n--- Test 14: Demo Shop Existence, Products, and Metrics ---');
+    const demoShop = await Shop.findOne({ slug: 'cataloza-demo-store' });
+    assert(Boolean(demoShop), 'Demo shop "cataloza-demo-store" exists in database');
+    assert(demoShop?.isDemo === true, 'Demo shop has isDemo === true');
+    assert(demoShop?.name === 'Cataloza Demo Store', 'Demo shop name is Cataloza Demo Store');
 
     // -------------------------------------------------------------
     // Cleanup

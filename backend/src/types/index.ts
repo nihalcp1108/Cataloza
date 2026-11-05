@@ -21,6 +21,7 @@ export interface IUserPayload {
   name: string;
   assignedShopIds: string[]; // For shop_admin (may manage one or explicitly assigned shops)
   tokenVersion?: number;
+  isDemo?: boolean;
 }
 
 export interface AuthenticatedRequest extends Request {

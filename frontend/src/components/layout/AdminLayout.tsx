@@ -17,6 +17,7 @@ import {
   X,
   Copy,
   Check,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../api/client';
@@ -58,7 +59,9 @@ export const AdminLayout: React.FC = () => {
 
   const primaryShop = user.assignedShopIds && user.assignedShopIds.length > 0 ? user.assignedShopIds[0] : null;
   const shopSlug = shop?.slug || (typeof primaryShop === 'object' ? primaryShop.slug : '');
-  const publicShopUrl = `${window.location.origin}/${shopSlug}`;
+  const isDemo = Boolean(user?.isDemo || shop?.isDemo || shopSlug === 'cataloza-demo-store');
+  const demoStoreUrl = `${window.location.origin}/cataloza-demo-store`;
+  const publicShopUrl = isDemo ? demoStoreUrl : `${window.location.origin}/${shopSlug}`;
 
   const navigation = [
     { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
@@ -120,7 +123,15 @@ export const AdminLayout: React.FC = () => {
                 {shop?.name || 'Shop Admin'}
               </span>
               <span className="text-[11px] text-blue-400 font-medium block truncate">
-                {shop?.slug ? `/${shop.slug}` : 'Wholesale Dashboard'}
+                {isDemo ? (
+                  <span className="inline-flex items-center gap-1 text-amber-300 font-semibold">
+                    <Sparkles className="w-2.5 h-2.5" /> Demo Mode
+                  </span>
+                ) : shop?.slug ? (
+                  `/${shop.slug}`
+                ) : (
+                  'Wholesale Dashboard'
+                )}
               </span>
             </div>
           </div>
@@ -155,8 +166,34 @@ export const AdminLayout: React.FC = () => {
           })}
         </nav>
 
-        {/* Public Shop Shortcut */}
-        {shopSlug && (
+        {/* Demo Storefront or Public Shop Shortcut */}
+        {isDemo ? (
+          <div className="p-3 border-t border-slate-800 space-y-2">
+            <div className="flex items-center justify-between gap-1 text-[11px] text-amber-400 px-1 font-semibold">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                Demo Storefront
+              </span>
+              <button
+                onClick={handleCopyLink}
+                className="flex items-center gap-1 text-slate-400 hover:text-white transition-colors"
+                title="Copy link"
+              >
+                {copiedLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                <span>{copiedLink ? 'Copied' : 'Copy'}</span>
+              </button>
+            </div>
+            <a
+              href={demoStoreUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-between p-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-xs font-bold text-white transition-all shadow-md shadow-blue-900/30"
+            >
+              <span>View Demo Store</span>
+              <ExternalLink className="w-3.5 h-3.5 text-blue-200 shrink-0 ml-1.5" />
+            </a>
+          </div>
+        ) : shopSlug ? (
           <div className="p-3 border-t border-slate-800 space-y-2">
             <div className="flex items-center justify-between gap-1 text-[11px] text-slate-400 px-1 font-medium">
               <span>Public Catalogue</span>
@@ -178,7 +215,7 @@ export const AdminLayout: React.FC = () => {
               <ExternalLink className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1.5" />
             </Link>
           </div>
-        )}
+        ) : null}
 
         {/* User Account / Logout */}
         <div className="p-3 border-t border-slate-800 flex items-center justify-between bg-slate-950/40">
