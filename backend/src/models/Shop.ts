@@ -51,7 +51,6 @@ export interface IShop extends Document {
   currency: string;
   currencySymbol: string;
   status: 'active' | 'inactive' | 'suspended';
-  isDemo?: boolean;
   subscriptionId?: Types.ObjectId;
   productFormTemplateId?: Types.ObjectId;
   createdBy?: Types.ObjectId;
@@ -186,11 +185,6 @@ const ShopSchema = new Schema<IShop>(
       type: String,
       enum: ['active', 'inactive', 'suspended'],
       default: 'active',
-      index: true,
-    },
-    isDemo: {
-      type: Boolean,
-      default: false,
       index: true,
     },
     subscriptionId: {

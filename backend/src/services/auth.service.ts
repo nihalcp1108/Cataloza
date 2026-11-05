@@ -17,7 +17,6 @@ export class AuthService {
       role: user.role,
       assignedShopIds: user.assignedShopIds ? user.assignedShopIds.map((id) => id.toString()) : [],
       tokenVersion: user.tokenVersion || 0,
-      isDemo: Boolean(user.isDemo),
     };
 
     return jwt.sign(payload, config.jwt.accessSecret, {

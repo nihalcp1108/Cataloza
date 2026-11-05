@@ -1084,15 +1084,6 @@ export class ShopAdminController {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
       }
-
-      if ((req.user?.isDemo || user.isDemo) && req.body.email && req.body.email.toLowerCase().trim() !== user.email) {
-        res.status(403).json({
-          success: false,
-          message: 'Email address cannot be changed in Demo Mode.',
-        });
-        return;
-      }
-
       if (name) user.name = name.trim();
       if (phone !== undefined) user.phone = phone.trim();
       await user.save();
@@ -1110,15 +1101,6 @@ export class ShopAdminController {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
       }
-
-      if (req.user?.isDemo || user.isDemo) {
-        res.status(403).json({
-          success: false,
-          message: 'Password modification is disabled in Demo Mode to ensure continuous public demonstration access.',
-        });
-        return;
-      }
-
       const isMatch = await user.comparePassword(currentPassword);
       if (!isMatch) {
         res.status(400).json({ success: false, message: 'Current password is not correct' });

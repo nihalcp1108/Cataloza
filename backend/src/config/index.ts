@@ -69,15 +69,6 @@ export const config = {
     bootstrapSecret: process.env.SUPER_ADMIN_BOOTSTRAP_SECRET || 'super_bootstrap_secure_token_2026',
   },
 
-  demoAdmin: {
-    email: (process.env.DEMO_ADMIN_EMAIL || 'demo@gmail.com').toLowerCase().trim(),
-    password: process.env.DEMO_ADMIN_PASSWORD || '123456789',
-    name: process.env.DEMO_ADMIN_NAME || 'Cataloza Demo Administrator',
-    enabled: process.env.ENABLE_DEMO_ACCOUNT !== 'false',
-    shopSlug: (process.env.DEMO_SHOP_SLUG || 'cataloza-demo-store').toLowerCase().trim(),
-    shopName: process.env.DEMO_SHOP_NAME || 'Cataloza Demo Store',
-  },
-
   reservedSlugs: [
     'admin',
     'superadmin',

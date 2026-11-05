@@ -12,7 +12,6 @@ export interface IUser extends Document {
   assignedShopIds: Types.ObjectId[];
   isActive: boolean;
   isVerified: boolean;
-  isDemo?: boolean;
   mustChangePassword?: boolean;
   lastLogin?: Date;
   passwordResetToken?: string;
@@ -67,11 +66,6 @@ const UserSchema = new Schema<IUser>(
       default: true,
     },
     isVerified: {
-      type: Boolean,
-      default: false,
-      index: true,
-    },
-    isDemo: {
       type: Boolean,
       default: false,
       index: true,

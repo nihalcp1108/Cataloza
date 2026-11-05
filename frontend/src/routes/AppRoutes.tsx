@@ -97,9 +97,6 @@ const RootEntry: React.FC = () => {
   }
 
   if (user.role === 'shop_admin') {
-    if (user.isDemo) {
-      return <Navigate to="/cataloza-demo-store" replace />;
-    }
     return <Navigate to="/admin/dashboard" replace />;
   }
 
