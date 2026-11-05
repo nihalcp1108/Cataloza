@@ -1049,7 +1049,7 @@ export const ShopDetailPage: React.FC = () => {
             <Input
               value={renewReference}
               onChange={(e) => setRenewReference(e.target.value)}
-              placeholder="e.g. UTR-98240284"
+              placeholder="Transaction UTR / Reference"
             />
           </div>
 
@@ -1141,7 +1141,7 @@ export const ShopDetailPage: React.FC = () => {
             <Input
               value={recordReference}
               onChange={(e) => setRecordReference(e.target.value)}
-              placeholder="e.g. UTR-98240284"
+              placeholder="Transaction UTR / Reference"
             />
           </div>
 
@@ -1150,7 +1150,7 @@ export const ShopDetailPage: React.FC = () => {
             <Input
               value={recordNotes}
               onChange={(e) => setRecordNotes(e.target.value)}
-              placeholder="e.g. Cheque clearance / Bank deposit"
+              placeholder="Accounting notes"
             />
           </div>
 

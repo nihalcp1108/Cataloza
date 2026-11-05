@@ -300,7 +300,7 @@ export class EmailService {
     const text =
       `Cataloza Security Verification\n\n` +
       `Your Super Admin login verification code is: ${otp}\n\n` +
-      `This code will expire in 10 minutes.\n` +
+      `This code will expire in 5 minutes.\n` +
       `If you did not initiate this login attempt, please review your account security immediately.\n\n` +
       `— Cataloza Security HQ`;
 
@@ -343,7 +343,98 @@ export class EmailService {
                   ${otp}
                 </span>
                 <p style="margin: 8px 0 0; color: #a5b4fc; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">
-                  Valid for 10 minutes only
+                  Valid for 5 minutes only
+                </p>
+              </div>
+              <div style="background-color: #334155; border-left: 4px solid #f59e0b; border-radius: 6px; padding: 12px 16px; margin-top: 24px;">
+                <p style="margin: 0; color: #cbd5e1; font-size: 12px; line-height: 1.5;">
+                  <strong style="color: #fbbf24;">Security Notice:</strong> Cataloza administrators will never request this code. Do not share it with anyone.
+                </p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 24px 32px; background-color: #0f172a; text-align: center; border-top: 1px solid #334155;">
+              <p style="margin: 0; color: #64748b; font-size: 11px;">
+                Cataloza Platform • Multi-Tenant Wholesale Commerce System
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;
+
+    await this.sendEmail({
+      to: targetEmail,
+      subject,
+      text,
+      html,
+    });
+  }
+
+  /**
+   * Send Store Admin (Dealer) 2FA login verification code
+   */
+  public static async sendAdminOtp(email: string, name: string, otp: string): Promise<void> {
+    const targetEmail = (email || '').toLowerCase().trim();
+    const displayName = (name || '').trim() || 'Store Administrator';
+    const subject = '🔐 Store Admin Login Verification Code — Cataloza';
+
+    const text =
+      `Cataloza Store Administrator Verification\n\n` +
+      `Hello ${displayName},\n\n` +
+      `Your Store Admin login verification code is: ${otp}\n\n` +
+      `This code will expire in 5 minutes.\n` +
+      `If you did not initiate this sign-in attempt, please review your account security immediately.\n\n` +
+      `— Cataloza Security Team`;
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Login Verification</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #0f172a; padding: 40px 10px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width: 540px; background-color: #1e293b; border-radius: 16px; border: 1px solid #334155; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
+          <tr>
+            <td style="padding: 32px 32px 24px; text-align: center; border-bottom: 1px solid #334155;">
+              <div style="display: inline-block; background-color: #059669; color: #ffffff; width: 44px; height: 44px; line-height: 44px; border-radius: 12px; font-weight: 900; font-size: 20px; margin-bottom: 12px;">
+                C
+              </div>
+              <h1 style="margin: 0; color: #f8fafc; font-size: 20px; font-weight: 800; letter-spacing: -0.025em;">
+                Cataloza Admin Portal
+              </h1>
+              <p style="margin: 6px 0 0; color: #94a3b8; font-size: 13px;">
+                Store Administrator Two-Factor Authentication
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px;">
+              <p style="margin: 0 0 16px; color: #e2e8f0; font-size: 14px; line-height: 1.6;">
+                Hello <strong>${displayName}</strong>,
+              </p>
+              <p style="margin: 0 0 16px; color: #e2e8f0; font-size: 14px; line-height: 1.6;">
+                A sign-in attempt was initiated for your Dealer Administrator account.
+              </p>
+              <p style="margin: 0 0 24px; color: #94a3b8; font-size: 13px; line-height: 1.5;">
+                Enter the six-digit verification code below to authorize your session:
+              </p>
+              <div style="background: linear-gradient(135deg, #0f172a 0%, #064e3b 100%); border: 2px solid #10b981; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
+                <span style="font-family: 'Courier New', Courier, monospace; font-size: 38px; font-weight: 900; color: #ffffff; letter-spacing: 12px; display: inline-block; margin-left: 12px;">
+                  ${otp}
+                </span>
+                <p style="margin: 8px 0 0; color: #6ee7b7; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">
+                  Valid for 5 minutes only
                 </p>
               </div>
               <div style="background-color: #334155; border-left: 4px solid #f59e0b; border-radius: 6px; padding: 12px 16px; margin-top: 24px;">

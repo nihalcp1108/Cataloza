@@ -450,7 +450,7 @@ export const SubscriptionAssignmentsPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. UTR-987123654"
+                    placeholder="Transaction UTR / Reference"
                     value={paymentRef}
                     onChange={(e) => setPaymentRef(e.target.value)}
                     className="w-full text-xs font-mono rounded-xl border border-slate-200 px-3 py-2"

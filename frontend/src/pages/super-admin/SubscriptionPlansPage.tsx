@@ -283,7 +283,7 @@ export const SubscriptionPlansPage: React.FC = () => {
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Professional"
+                    placeholder="Plan name"
                     className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:border-blue-600"
                   />
                 </div>
@@ -294,7 +294,7 @@ export const SubscriptionPlansPage: React.FC = () => {
                     required
                     value={code}
                     onChange={(e) => setCode(e.target.value.toUpperCase())}
-                    placeholder="e.g. PLAN_PRO"
+                    placeholder="Plan code"
                     className="w-full text-xs font-mono rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:border-blue-600"
                   />
                 </div>

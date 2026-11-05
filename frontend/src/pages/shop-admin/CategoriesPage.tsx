@@ -201,7 +201,7 @@ export const CategoriesPage: React.FC = () => {
         <form onSubmit={handleSave} className="space-y-4">
           <Input
             label="Category Name"
-            placeholder="e.g. Edible Oils & Ghee"
+            placeholder="Category name"
             required
             value={name}
             onChange={(e) => setName(e.target.value)}

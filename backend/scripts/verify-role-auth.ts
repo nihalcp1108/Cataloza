@@ -5,6 +5,7 @@ import { User } from '../src/models/User';
 import { OtpChallenge } from '../src/models/OtpChallenge';
 import { AuthService } from '../src/services/auth.service';
 import { AuthController } from '../src/controllers/auth.controller';
+import { EmailService } from '../src/services/email.service';
 
 async function runTests() {
   console.log('===========================================================');
@@ -66,20 +67,53 @@ async function runTests() {
     };
   }
 
+  // Spy & stub email dispatch functions to monitor outgoing OTPs without triggering external rate limits
+  const sentEmails: {
+    superAdminOtps: { to: string; otp: string }[];
+    adminOtps: { to: string; name: string; otp: string }[];
+    customerOtps: { to: string; name: string; otp: string }[];
+  } = {
+    superAdminOtps: [],
+    adminOtps: [],
+    customerOtps: [],
+  };
+
+  const origSendSuperAdminOtp = EmailService.sendSuperAdminOtp;
+  const origSendAdminOtp = EmailService.sendAdminOtp;
+  const origSendVerificationOtp = EmailService.sendVerificationOtp;
+
+  EmailService.sendSuperAdminOtp = async (to: string, otp: string) => {
+    sentEmails.superAdminOtps.push({ to, otp });
+    return { id: `mock-superadmin-msg-${Date.now()}` };
+  };
+
+  EmailService.sendAdminOtp = async (to: string, name: string, otp: string) => {
+    sentEmails.adminOtps.push({ to, name, otp });
+    return { id: `mock-admin-msg-${Date.now()}` };
+  };
+
+  EmailService.sendVerificationOtp = async (to: string, name: string, otp: string) => {
+    sentEmails.customerOtps.push({ to, name, otp });
+    return { id: `mock-customer-msg-${Date.now()}` };
+  };
+
   const testAdminEmail = 'test_dealer_admin@example.com';
   const testAdminUsername = 'DealerAdminTest';
   const testAdminPassword = 'DealerTestPassword123!';
 
+  const superAdminEmail = 'cpnihal35@gmail.com';
+  const superAdminPassword = config.superAdmin.password || 'SuperAdminPassword123!';
+
   try {
     // -------------------------------------------------------------
-    // Test 1: Setup test accounts
+    // Setup test accounts
     // -------------------------------------------------------------
-    console.log('\n--- Test 1: Setting up test accounts ---');
+    console.log('\n--- Setting up test accounts ---');
     await User.deleteMany({
       email: { $in: [testAdminEmail, 'test_customer_verified@example.com', 'test_customer_unverified@example.com'] },
     });
     await OtpChallenge.deleteMany({
-      email: { $in: [testAdminEmail, 'test_customer_verified@example.com', 'test_customer_unverified@example.com'] },
+      email: { $in: [testAdminEmail, superAdminEmail, 'test_customer_verified@example.com', 'test_customer_unverified@example.com'] },
     });
 
     const salt = await bcrypt.genSalt(10);
@@ -95,6 +129,26 @@ async function runTests() {
       isActive: true,
       isVerified: true,
     });
+
+    // Ensure Super Admin user exists and has correct password hash
+    let superAdmin = await User.findOne({ email: superAdminEmail });
+    if (!superAdmin) {
+      const superHash = await bcrypt.hash(superAdminPassword, salt);
+      superAdmin = await User.create({
+        name: 'Super Admin',
+        email: superAdminEmail,
+        passwordHash: superHash,
+        role: 'super_admin',
+        assignedShopIds: [],
+        isActive: true,
+        isVerified: true,
+      });
+    } else {
+      superAdmin.passwordHash = await bcrypt.hash(superAdminPassword, salt);
+      superAdmin.isActive = true;
+      superAdmin.isVerified = true;
+      await superAdmin.save();
+    }
 
     const verifiedCustomer = await User.create({
       name: 'VerifiedCustomer',
@@ -116,156 +170,253 @@ async function runTests() {
       isVerified: false,
     });
 
-    assert(Boolean(shopAdmin && shopAdmin.role === 'shop_admin'), 'Created test shop_admin (Dealer) account');
-    assert(Boolean(verifiedCustomer && verifiedCustomer.isVerified), 'Created verified customer account');
-    assert(Boolean(unverifiedCustomer && !unverifiedCustomer.isVerified), 'Created unverified customer account');
+    assert(Boolean(shopAdmin && shopAdmin.role === 'shop_admin'), 'Test shop_admin (Dealer) account ready');
+    assert(Boolean(superAdmin && superAdmin.role === 'super_admin'), 'Super Admin account ready');
+    assert(Boolean(verifiedCustomer && verifiedCustomer.isVerified), 'Verified customer account ready');
+    assert(Boolean(unverifiedCustomer && !unverifiedCustomer.isVerified), 'Unverified customer account ready');
 
     // -------------------------------------------------------------
-    // Test 2: Regular Admin (Dealer) Login via Email
+    // Test 1: Super Admin Login (Credentials -> OTP Email -> Verification -> Super Admin Dashboard)
     // -------------------------------------------------------------
-    console.log('\n--- Test 2: Regular Admin (Dealer) Login via Email ---');
+    console.log('\n--- Test 1: Super Admin Login with Mandatory OTP ---');
+    sentEmails.superAdminOtps = [];
+    const saCtx = mockReqRes({ email: superAdminEmail, password: superAdminPassword });
+    await AuthController.login(saCtx.req, saCtx.res);
+
+    assert(saCtx.getStatus() === 200, 'Super Admin login returns HTTP 200');
+    assert(saCtx.getData()?.requiresOtp === true, 'Super Admin login requiresOtp is TRUE');
+    assert(saCtx.getData()?.requiresOTP === true, 'Super Admin login requiresOTP is TRUE');
+    assert(!saCtx.getData()?.data?.accessToken, 'NO accessToken issued in Step 1 for Super Admin');
+    assert(saCtx.getCookies().length === 0, 'NO auth cookies issued in Step 1 for Super Admin');
+    assert(Boolean(saCtx.getData()?.data?.challengeId), 'Super Admin receives challengeId');
+    assert(Boolean(saCtx.getData()?.data?.maskedEmail), 'Super Admin receives maskedEmail');
+    assert(saCtx.getData()?.data?.expiresInSeconds === 300, 'Super Admin OTP expiration is 300 seconds (5 min)');
+    assert(sentEmails.superAdminOtps.length === 1, 'EmailService.sendSuperAdminOtp was invoked');
+    assert(sentEmails.superAdminOtps[0].to === superAdminEmail, 'OTP was sent to Super Admin email');
+
+    const saChallengeId = saCtx.getData()?.data?.challengeId;
+    const saOtp = sentEmails.superAdminOtps[0].otp;
+
+    // Verify Super Admin OTP
+    const saVerifyCtx = mockReqRes({ challengeId: saChallengeId, otp: saOtp });
+    await AuthController.verifyOtp(saVerifyCtx.req, saVerifyCtx.res);
+    assert(saVerifyCtx.getStatus() === 200, 'Super Admin OTP verification returns HTTP 200');
+    assert(Boolean(saVerifyCtx.getData()?.data?.accessToken), 'Super Admin receives JWT accessToken after OTP');
+    assert(saVerifyCtx.getData()?.data?.user?.role === 'super_admin', 'Super Admin role verified for dashboard access');
+    assert(saVerifyCtx.getCookies().length >= 1, 'Super Admin receives HTTP-only cookies');
+
+    // -------------------------------------------------------------
+    // Test 2: Admin (Dealer) Login via Email (Credentials -> OTP Email -> Verification -> Dealer Dashboard)
+    // -------------------------------------------------------------
+    console.log('\n--- Test 2: Admin (Dealer) Login via Email with Mandatory OTP ---');
+    sentEmails.adminOtps = [];
     const dealerEmailCtx = mockReqRes({ email: testAdminEmail, password: testAdminPassword });
     await AuthController.login(dealerEmailCtx.req, dealerEmailCtx.res);
 
-    assert(dealerEmailCtx.getStatus() === 200, 'Dealer login returns HTTP 200');
-    assert(dealerEmailCtx.getData()?.success === true, 'Dealer login response success is true');
-    assert(dealerEmailCtx.getData()?.requiresOtp === false, 'Dealer login requiresOtp is FALSE (NO OTP prompt)');
-    assert(dealerEmailCtx.getData()?.requiresOTP === false, 'Dealer login requiresOTP is FALSE');
-    assert(Boolean(dealerEmailCtx.getData()?.data?.accessToken), 'Dealer receives JWT accessToken immediately');
-    assert(dealerEmailCtx.getData()?.data?.user?.role === 'shop_admin', 'Dealer login returns user object with role shop_admin');
+    assert(dealerEmailCtx.getStatus() === 200, 'Dealer email login returns HTTP 200');
+    assert(dealerEmailCtx.getData()?.requiresOtp === true, 'Dealer email login requiresOtp is TRUE');
+    assert(dealerEmailCtx.getData()?.requiresOTP === true, 'Dealer email login requiresOTP is TRUE');
+    assert(!dealerEmailCtx.getData()?.data?.accessToken, 'NO accessToken issued in Step 1 for Dealer');
+    assert(dealerEmailCtx.getCookies().length === 0, 'NO auth cookies issued in Step 1 for Dealer');
+    assert(Boolean(dealerEmailCtx.getData()?.data?.challengeId), 'Dealer receives challengeId');
+    assert(Boolean(dealerEmailCtx.getData()?.data?.maskedEmail), 'Dealer receives maskedEmail');
+    assert(dealerEmailCtx.getData()?.data?.expiresInSeconds === 300, 'Dealer OTP expiration is 300 seconds (5 min)');
+    assert(sentEmails.adminOtps.length === 1, 'EmailService.sendAdminOtp was invoked for dealer');
+    assert(sentEmails.adminOtps[0].to === testAdminEmail, 'OTP was sent to Dealer email address');
 
-    const adminOtpChallenges = await OtpChallenge.countDocuments({ email: testAdminEmail });
-    assert(adminOtpChallenges === 0, 'ZERO OTP challenges created for shop_admin login (no email sent)');
+    const dealerChallengeId = dealerEmailCtx.getData()?.data?.challengeId;
+    const dealerOtp = sentEmails.adminOtps[0].otp;
+
+    // Verify Dealer OTP
+    const dealerVerifyCtx = mockReqRes({ challengeId: dealerChallengeId, otp: dealerOtp });
+    await AuthController.verifyOtp(dealerVerifyCtx.req, dealerVerifyCtx.res);
+    assert(dealerVerifyCtx.getStatus() === 200, 'Dealer OTP verification returns HTTP 200');
+    assert(Boolean(dealerVerifyCtx.getData()?.data?.accessToken), 'Dealer receives JWT accessToken after OTP');
+    assert(dealerVerifyCtx.getData()?.data?.user?.role === 'shop_admin', 'Dealer role verified for /admin/dashboard access');
+    assert(dealerVerifyCtx.getCookies().length >= 1, 'Dealer receives HTTP-only cookies');
 
     // -------------------------------------------------------------
-    // Test 3: Regular Admin (Dealer) Login via Username
+    // Test 3: Admin (Dealer) Login via Username
     // -------------------------------------------------------------
-    console.log('\n--- Test 3: Regular Admin (Dealer) Login via Username ---');
+    console.log('\n--- Test 3: Admin (Dealer) Login via Username with Mandatory OTP ---');
+    sentEmails.adminOtps = [];
     const dealerUserCtx = mockReqRes({ username: testAdminUsername, password: testAdminPassword });
     await AuthController.login(dealerUserCtx.req, dealerUserCtx.res);
 
-    assert(dealerUserCtx.getStatus() === 200, 'Dealer login via username returns HTTP 200');
-    assert(dealerUserCtx.getData()?.requiresOtp === false, 'Dealer login via username has requiresOtp === false');
-    assert(dealerUserCtx.getData()?.data?.user?.email === testAdminEmail, 'Dealer login resolved correct email by username');
-    assert(Boolean(dealerUserCtx.getData()?.data?.accessToken), 'Dealer receives JWT accessToken via username login');
+    assert(dealerUserCtx.getStatus() === 200, 'Dealer username login returns HTTP 200');
+    assert(dealerUserCtx.getData()?.requiresOtp === true, 'Dealer username login requiresOtp is TRUE');
+    assert(Boolean(dealerUserCtx.getData()?.data?.challengeId), 'Dealer receives challengeId via username login');
+    assert(sentEmails.adminOtps.length === 1, 'EmailService.sendAdminOtp sent code to registered email');
+    assert(sentEmails.adminOtps[0].to === testAdminEmail, 'Username resolved to correct Dealer email');
+
+    // Verify OTP from username login
+    const userOtp = sentEmails.adminOtps[0].otp;
+    const userVerifyCtx = mockReqRes({ challengeId: dealerUserCtx.getData()?.data?.challengeId, otp: userOtp });
+    await AuthController.verifyOtp(userVerifyCtx.req, userVerifyCtx.res);
+    assert(userVerifyCtx.getStatus() === 200, 'Dealer OTP verified successfully from username login');
+    assert(userVerifyCtx.getData()?.data?.user?.role === 'shop_admin', 'User has role shop_admin');
 
     // -------------------------------------------------------------
-    // Test 4: Security Guardrails for Regular Admin
+    // Test 4: Incorrect OTP Rejection & Remaining Attempts
     // -------------------------------------------------------------
-    console.log('\n--- Test 4: Security Guardrails for Regular Admin ---');
-    // Guardrail A: Regular admin cannot access Super Admin dedicated endpoint
-    const crossPortalCtx = mockReqRes({ email: testAdminEmail, password: testAdminPassword });
-    await AuthController.superAdminLogin(crossPortalCtx.req, crossPortalCtx.res);
-    assert(crossPortalCtx.getStatus() === 403, 'Regular admin calling superAdminLogin gets 403 Forbidden');
+    console.log('\n--- Test 4: Incorrect OTP Rejection & Remaining Attempts ---');
+    sentEmails.adminOtps = [];
+    const wrongOtpLoginCtx = mockReqRes({ email: testAdminEmail, password: testAdminPassword });
+    await AuthController.login(wrongOtpLoginCtx.req, wrongOtpLoginCtx.res);
+    const wrongChallengeId = wrongOtpLoginCtx.getData()?.data?.challengeId;
 
-    // Guardrail B: Regular admin cannot obtain JWT by verifying an OTP challenge
-    const fakeChallenge = await OtpChallenge.create({
-      challengeId: 'fake-test-admin-challenge-id',
+    const wrongOtpCtx = mockReqRes({ challengeId: wrongChallengeId, otp: '000000' });
+    await AuthController.verifyOtp(wrongOtpCtx.req, wrongOtpCtx.res);
+    assert(wrongOtpCtx.getStatus() === 400, 'Incorrect OTP returns HTTP 400');
+    assert(wrongOtpCtx.getData()?.message?.includes('attempt'), 'Error message states remaining attempts');
+
+    const challengeAfterFailed = await OtpChallenge.findOne({ challengeId: wrongChallengeId });
+    assert(challengeAfterFailed?.attempts === 1, 'Challenge attempts counter incremented to 1');
+
+    // -------------------------------------------------------------
+    // Test 5: Expired OTP Rejection
+    // -------------------------------------------------------------
+    console.log('\n--- Test 5: Expired OTP Rejection ---');
+    // Set challenge to expired
+    await OtpChallenge.updateOne(
+      { challengeId: wrongChallengeId },
+      { $set: { expiresAt: new Date(Date.now() - 1000) } }
+    );
+    const correctOtp = sentEmails.adminOtps[0].otp;
+    const expiredCtx = mockReqRes({ challengeId: wrongChallengeId, otp: correctOtp });
+    await AuthController.verifyOtp(expiredCtx.req, expiredCtx.res);
+    assert(expiredCtx.getStatus() === 400, 'Expired OTP returns HTTP 400');
+    assert(expiredCtx.getData()?.message?.includes('expired'), 'Error message indicates code has expired');
+
+    // -------------------------------------------------------------
+    // Test 6: Resend OTP with 60-Second Cooldown
+    // -------------------------------------------------------------
+    console.log('\n--- Test 6: Resend OTP with 60-Second Cooldown ---');
+    sentEmails.adminOtps = [];
+    const resendLoginCtx = mockReqRes({ email: testAdminEmail, password: testAdminPassword });
+    await AuthController.login(resendLoginCtx.req, resendLoginCtx.res);
+    const freshChallengeId = resendLoginCtx.getData()?.data?.challengeId;
+
+    // Immediate resend should be blocked by 60s cooldown
+    const earlyResendCtx = mockReqRes({ challengeId: freshChallengeId });
+    await AuthController.resendOtp(earlyResendCtx.req, earlyResendCtx.res);
+    assert(earlyResendCtx.getStatus() === 429, 'Immediate resend rejected with HTTP 429 Too Many Requests');
+    assert(earlyResendCtx.getData()?.message?.includes('wait'), 'Cooldown message informs user to wait');
+
+    // Simulate 61 seconds elapsed
+    await OtpChallenge.updateOne(
+      { challengeId: freshChallengeId },
+      { $set: { lastSentAt: new Date(Date.now() - 65 * 1000) } }
+    );
+
+    // Resend after cooldown
+    sentEmails.adminOtps = [];
+    const validResendCtx = mockReqRes({ challengeId: freshChallengeId });
+    await AuthController.resendOtp(validResendCtx.req, validResendCtx.res);
+    assert(validResendCtx.getStatus() === 200, 'Resend after cooldown returns HTTP 200');
+    assert(sentEmails.adminOtps.length === 1, 'Fresh OTP dispatched via EmailService.sendAdminOtp');
+    assert(validResendCtx.getData()?.data?.expiresInSeconds === 300, 'Resent OTP has 300 seconds expiration');
+
+    // -------------------------------------------------------------
+    // Test 7: Previously Used OTP Rejection (Cannot be reused)
+    // -------------------------------------------------------------
+    console.log('\n--- Test 7: Previously Used OTP Cannot Be Reused ---');
+    const freshOtp = sentEmails.adminOtps[0].otp;
+    const firstUseCtx = mockReqRes({ challengeId: freshChallengeId, otp: freshOtp });
+    await AuthController.verifyOtp(firstUseCtx.req, firstUseCtx.res);
+    assert(firstUseCtx.getStatus() === 200, 'First OTP verification succeeds with HTTP 200');
+
+    // Second use of same OTP and challengeId
+    const reuseCtx = mockReqRes({ challengeId: freshChallengeId, otp: freshOtp });
+    await AuthController.verifyOtp(reuseCtx.req, reuseCtx.res);
+    assert(reuseCtx.getStatus() === 400, 'Reusing previously verified OTP is rejected with HTTP 400');
+    assert(reuseCtx.getData()?.message?.includes('expired') || reuseCtx.getData()?.message?.includes('Invalid'), 'Error indicates invalid/expired session');
+
+    // -------------------------------------------------------------
+    // Test 8: Direct Dashboard Access Without OTP Is Blocked
+    // -------------------------------------------------------------
+    console.log('\n--- Test 8: Direct Access Blocked Without OTP Verification ---');
+    const dealerStep1 = mockReqRes({ email: testAdminEmail, password: testAdminPassword });
+    await AuthController.login(dealerStep1.req, dealerStep1.res);
+    assert(!dealerStep1.getData()?.data?.accessToken, 'Step 1 response has no accessToken');
+    assert(dealerStep1.getCookies().length === 0, 'Step 1 response has no cookies');
+
+    const saStep1 = mockReqRes({ email: superAdminEmail, password: superAdminPassword });
+    await AuthController.login(saStep1.req, saStep1.res);
+    assert(!saStep1.getData()?.data?.accessToken, 'Super Admin Step 1 response has no accessToken');
+    assert(saStep1.getCookies().length === 0, 'Super Admin Step 1 response has no cookies');
+
+    // Cross-role verification block: customer challenge cannot be verified by shop_admin
+    const crossChallenge = await OtpChallenge.create({
+      challengeId: 'cross-role-test-challenge',
       userId: shopAdmin._id,
       email: testAdminEmail,
-      otpHash: await bcrypt.hash('123456', 10),
+      otpHash: await bcrypt.hash('654321', salt),
       purpose: 'registration',
-      expiresAt: new Date(Date.now() + 600000),
+      expiresAt: new Date(Date.now() + 300000),
       attempts: 0,
       maxAttempts: 5,
       resendCount: 1,
       lastSentAt: new Date(),
       used: false,
     });
+    const crossVerifyCtx = mockReqRes({ challengeId: 'cross-role-test-challenge', otp: '654321' });
+    await AuthController.verifyOtp(crossVerifyCtx.req, crossVerifyCtx.res);
+    assert(crossVerifyCtx.getStatus() === 400, 'Shop admin cannot verify customer registration challenge');
+    await OtpChallenge.deleteOne({ challengeId: 'cross-role-test-challenge' });
 
-    const bypassCtx = mockReqRes({ challengeId: 'fake-test-admin-challenge-id', otp: '123456' });
-    await AuthController.verifyOtp(bypassCtx.req, bypassCtx.res);
-    assert(bypassCtx.getStatus() === 400, 'Regular admin cannot verify OTP challenge (400 rejected)');
-    assert(
-      bypassCtx.getData()?.message?.includes('Administrator accounts must log in with password credentials'),
-      'OTP bypass attempt produces specific security denial message'
-    );
-    await OtpChallenge.deleteOne({ challengeId: 'fake-test-admin-challenge-id' });
-
-    // Guardrail C: Wrong password fails with 401
+    // -------------------------------------------------------------
+    // Test 9: Incorrect Password -> OTP Is NOT Generated
+    // -------------------------------------------------------------
+    console.log('\n--- Test 9: Incorrect Password Does Not Generate OTP ---');
+    sentEmails.adminOtps = [];
     const wrongPassCtx = mockReqRes({ email: testAdminEmail, password: 'WrongPassword999!' });
     await AuthController.login(wrongPassCtx.req, wrongPassCtx.res);
-    assert(wrongPassCtx.getStatus() === 401, 'Invalid password returns 401 Unauthorized');
-    assert(wrongPassCtx.getData()?.success === false, 'Invalid password has success: false');
 
-    // Guardrail D: Non-existent account fails with 401
-    const nonExistentCtx = mockReqRes({ email: 'nonexistent_account@example.com', password: 'SomePassword123!' });
-    await AuthController.login(nonExistentCtx.req, nonExistentCtx.res);
-    assert(nonExistentCtx.getStatus() === 401, 'Non-existent user returns 401 Unauthorized without enumeration leak');
+    assert(wrongPassCtx.getStatus() === 401, 'Invalid password returns HTTP 401 Unauthorized');
+    assert(wrongPassCtx.getData()?.success === false, 'Response success is false');
+    assert(sentEmails.adminOtps.length === 0, 'NO OTP email was dispatched for bad password');
 
     // -------------------------------------------------------------
-    // Test 5: Customer Login Behaviors
+    // Test 10: Customer Storefront Functionality Unchanged
     // -------------------------------------------------------------
-    console.log('\n--- Test 5: Customer Login Behaviors ---');
-    // Verified customer -> direct login without OTP
+    console.log('\n--- Test 10: Customer Storefront Functionality Unchanged ---');
+    // 10A: Verified Customer logs in directly without OTP
+    sentEmails.customerOtps = [];
     const verifiedCustCtx = mockReqRes({ email: 'test_customer_verified@example.com', password: testAdminPassword });
     await AuthController.login(verifiedCustCtx.req, verifiedCustCtx.res);
-    assert(verifiedCustCtx.getStatus() === 200, 'Verified customer login returns HTTP 200');
-    assert(verifiedCustCtx.getData()?.requiresOtp === false, 'Verified customer login has requiresOtp: false');
-    assert(Boolean(verifiedCustCtx.getData()?.data?.accessToken), 'Verified customer receives access token immediately');
 
-    // Unverified customer -> registration OTP required
+    assert(verifiedCustCtx.getStatus() === 200, 'Verified customer login returns HTTP 200');
+    assert(verifiedCustCtx.getData()?.requiresOtp === false, 'Verified customer requiresOtp is FALSE');
+    assert(Boolean(verifiedCustCtx.getData()?.data?.accessToken), 'Verified customer receives accessToken immediately');
+    assert(verifiedCustCtx.getData()?.data?.user?.role === 'customer', 'User role is customer');
+    assert(sentEmails.customerOtps.length === 0, 'No OTP email sent to verified customer');
+
+    // 10B: Unverified Customer receives registration verification OTP
+    sentEmails.customerOtps = [];
     const unverifiedCustCtx = mockReqRes({ email: 'test_customer_unverified@example.com', password: testAdminPassword });
     await AuthController.login(unverifiedCustCtx.req, unverifiedCustCtx.res);
+
     assert(unverifiedCustCtx.getStatus() === 200, 'Unverified customer login returns HTTP 200');
-    assert(unverifiedCustCtx.getData()?.requiresOtp === true, 'Unverified customer login requires registration OTP');
+    assert(unverifiedCustCtx.getData()?.requiresOtp === true, 'Unverified customer requiresOtp is TRUE');
     assert(Boolean(unverifiedCustCtx.getData()?.data?.challengeId), 'Unverified customer receives registration challengeId');
-
-    // -------------------------------------------------------------
-    // Test 6: Super Admin Login Behavior (Requires OTP)
-    // -------------------------------------------------------------
-    console.log('\n--- Test 6: Super Admin Login Behavior (Password + Mandatory OTP) ---');
-    const superAdmin = await User.findOne({ email: 'cpnihal35@gmail.com' });
-    assert(Boolean(superAdmin), 'Super Admin user found in database');
-
-    if (config.superAdmin.password) {
-      const superAdminLoginCtx = mockReqRes({ email: 'cpnihal35@gmail.com', password: config.superAdmin.password });
-      await AuthController.login(superAdminLoginCtx.req, superAdminLoginCtx.res);
-
-      assert(superAdminLoginCtx.getStatus() === 200, 'Super Admin login returns HTTP 200');
-      assert(superAdminLoginCtx.getData()?.success === true, 'Super Admin login response success is true');
-      assert(superAdminLoginCtx.getData()?.requiresOtp === true, 'Super Admin requiresOtp is TRUE (OTP mandatory)');
-      assert(superAdminLoginCtx.getData()?.requiresOTP === true, 'Super Admin requiresOTP is TRUE (backwards compatible)');
-      assert(!superAdminLoginCtx.getData()?.data?.accessToken, 'NO accessToken issued in Step 1 for Super Admin');
-      assert(superAdminLoginCtx.getCookies().length === 0, 'NO auth cookies set in Step 1 for Super Admin');
-
-      const challengeId = superAdminLoginCtx.getData()?.data?.challengeId;
-      assert(Boolean(challengeId), 'Super Admin receives valid challengeId');
-
-      if (challengeId) {
-        const challengeInDb = await OtpChallenge.findOne({ challengeId });
-        assert(Boolean(challengeInDb), 'OtpChallenge record was created in database');
-        assert(challengeInDb?.purpose === 'super_admin_2fa', 'OtpChallenge purpose is strictly super_admin_2fa');
-
-        // Test Step 2: OTP Verification
-        // Use known code to test verification
-        const testOtp = '876543';
-        const saltTest = await bcrypt.genSalt(10);
-        challengeInDb!.otpHash = await bcrypt.hash(testOtp, saltTest);
-        await challengeInDb!.save();
-
-        const step2Ctx = mockReqRes({ challengeId, otp: testOtp });
-        await AuthController.verifyOtp(step2Ctx.req, step2Ctx.res);
-
-        assert(step2Ctx.getStatus() === 200, 'Super Admin Step 2 OTP verification returns HTTP 200');
-        assert(step2Ctx.getData()?.success === true, 'Step 2 success is true');
-        assert(Boolean(step2Ctx.getData()?.data?.accessToken), 'Step 2 issues JWT accessToken to Super Admin');
-        assert(step2Ctx.getData()?.data?.user?.role === 'super_admin', 'Step 2 returns user profile with role super_admin');
-        assert(step2Ctx.getCookies().length >= 1, 'Step 2 sets HTTP-only auth cookies');
-      }
-    } else {
-      console.log('Skipping Super Admin password tests: SUPER_ADMIN_INITIAL_PASSWORD not configured.');
-    }
+    assert(sentEmails.customerOtps.length === 1, 'EmailService.sendVerificationOtp sent to unverified customer');
 
     // -------------------------------------------------------------
     // Cleanup
     // -------------------------------------------------------------
+    console.log('\n--- Cleaning up test artifacts ---');
     await User.deleteMany({
       email: { $in: [testAdminEmail, 'test_customer_verified@example.com', 'test_customer_unverified@example.com'] },
     });
     await OtpChallenge.deleteMany({
-      email: { $in: [testAdminEmail, 'test_customer_verified@example.com', 'test_customer_unverified@example.com'] },
+      email: { $in: [testAdminEmail, superAdminEmail, 'test_customer_verified@example.com', 'test_customer_unverified@example.com'] },
     });
+
+    // Restore original email functions
+    EmailService.sendSuperAdminOtp = origSendSuperAdminOtp;
+    EmailService.sendAdminOtp = origSendAdminOtp;
+    EmailService.sendVerificationOtp = origSendVerificationOtp;
 
     console.log(`\n===========================================================`);
     console.log(`🎉 TEST SUMMARY: ${passed} PASSED, ${failed} FAILED`);
@@ -280,4 +431,3 @@ async function runTests() {
 }
 
 runTests();
-

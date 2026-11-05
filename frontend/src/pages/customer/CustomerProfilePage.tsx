@@ -109,7 +109,7 @@ export const CustomerProfilePage: React.FC = () => {
             <input
               type="tel"
               {...register('phone')}
-              placeholder="+91 ..."
+              placeholder="Phone / WhatsApp number"
               className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2.5 focus:outline-none focus:border-blue-600"
             />
           </div>

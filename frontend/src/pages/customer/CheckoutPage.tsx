@@ -448,14 +448,14 @@ export const CheckoutPage: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Input
                       label="Full Name *"
-                      placeholder="e.g. Ramesh Kumar"
+                      placeholder="Full name"
                       error={errors.fullName?.message}
                       {...register('fullName')}
                     />
 
                     <Input
                       label="Mobile Number *"
-                      placeholder="e.g. 9876543210"
+                      placeholder="Mobile number"
                       type="tel"
                       inputMode="numeric"
                       maxLength={10}
@@ -467,7 +467,7 @@ export const CheckoutPage: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Input
                       label="WhatsApp Number (Optional)"
-                      placeholder="Same as mobile if empty"
+                      placeholder="WhatsApp number"
                       type="tel"
                       inputMode="numeric"
                       maxLength={10}
@@ -477,7 +477,7 @@ export const CheckoutPage: React.FC = () => {
 
                     <Input
                       label="Shop / Business Name (Optional)"
-                      placeholder="e.g. Kumar General Stores"
+                      placeholder="Shop / Business name"
                       error={errors.businessName?.message}
                       {...register('businessName')}
                     />
@@ -485,14 +485,14 @@ export const CheckoutPage: React.FC = () => {
 
                   <Input
                     label="Address Line 1 / House or Building Name *"
-                    placeholder="e.g. Flat 302, Green Heights, Opp. Market"
+                    placeholder="Address line 1"
                     error={errors.addressLine1?.message}
                     {...register('addressLine1')}
                   />
 
                   <Input
                     label="Address Line 2 / Landmark (Optional)"
-                    placeholder="e.g. Near Old Bus Stand"
+                    placeholder="Landmark (Optional)"
                     error={errors.addressLine2?.message}
                     {...register('addressLine2')}
                   />
@@ -514,7 +514,7 @@ export const CheckoutPage: React.FC = () => {
 
                     <Input
                       label="State *"
-                      placeholder="State (e.g. Maharashtra)"
+                      placeholder="State"
                       error={errors.state?.message}
                       {...register('state')}
                     />
@@ -523,7 +523,7 @@ export const CheckoutPage: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Input
                       label="PIN Code *"
-                      placeholder="6-digit PIN (e.g. 400001)"
+                      placeholder="PIN Code"
                       type="text"
                       inputMode="numeric"
                       maxLength={6}

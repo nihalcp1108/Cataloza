@@ -233,7 +233,7 @@ export const ProductEditorPage: React.FC = () => {
 
           <Input
             label="Product Title"
-            placeholder="e.g. Royal Basmati Rice Aged 2 Years (50kg Bulk Sack)"
+            placeholder="Product title"
             error={errors.name?.message}
             {...register('name')}
           />
@@ -241,7 +241,7 @@ export const ProductEditorPage: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="SKU (Stock Keeping Unit)"
-              placeholder="e.g. ABC-RICE-050"
+              placeholder="Product SKU"
               helperText="Must be unique within your shop."
               error={errors.sku?.message}
               {...register('sku')}
@@ -458,7 +458,7 @@ export const ProductEditorPage: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Unit of Sale"
-              placeholder="e.g. piece, 50kg sack, case (24 cans), carton"
+              placeholder="Unit of sale"
               error={errors.unit?.message}
               {...register('unit')}
             />
@@ -614,7 +614,7 @@ export const ProductEditorPage: React.FC = () => {
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-slate-600 mb-1">Variant Name</label>
                 <input
-                  placeholder="e.g. 500g Jar or Blue Pack"
+                  placeholder="Variant name"
                   className="w-full text-xs rounded-lg border border-slate-300 p-2"
                   {...register(`variants.${index}.name` as const)}
                 />

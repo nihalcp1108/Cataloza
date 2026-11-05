@@ -70,6 +70,21 @@ export class AuthService {
   }
 
   /**
+   * Safely mask an email address for public display (e.g. c****5@gmail.com)
+   */
+  public static maskEmail(email: string): string {
+    if (!email || !email.includes('@')) return email || '';
+    const [local, domain] = email.split('@');
+    if (local.length <= 2) {
+      return `${local[0]}***@${domain}`;
+    }
+    const first = local[0];
+    const last = local[local.length - 1];
+    const maskedLength = Math.max(local.length - 2, 3);
+    return `${first}${'*'.repeat(maskedLength)}${last}@${domain}`;
+  }
+
+  /**
    * Find user by email or username (name) case-insensitively
    */
   public static async findUserByIdentifier(identifier: string): Promise<IUser | null> {
@@ -250,9 +265,12 @@ export class AuthService {
       throw new Error('Access denied: Challenge does not belong to an authorized Super Administrator.');
     }
 
-    // Regular admin accounts must NOT use OTP challenges to obtain tokens
-    if (user.role === 'shop_admin') {
-      throw new Error('Access denied: Administrator accounts must log in with password credentials.');
+    if (challenge.purpose === 'login_2fa' && user.role !== 'shop_admin') {
+      throw new Error('Access denied: Challenge does not belong to an authorized Administrator.');
+    }
+
+    if (challenge.purpose === 'registration' && user.role !== 'customer') {
+      throw new Error('Access denied: Invalid registration challenge.');
     }
 
     user.isVerified = true;
@@ -286,13 +304,12 @@ export class AuthService {
       throw new Error('This account has been deactivated. Please contact support.');
     }
 
-    // Regular admin accounts must NOT resend OTPs
-    if (user.role === 'shop_admin') {
-      throw new Error('Access denied: Administrator accounts do not use OTP verification.');
-    }
-
     if (challenge.purpose === 'super_admin_2fa' && user.role !== 'super_admin') {
       throw new Error('Access denied: Challenge does not belong to a Super Administrator.');
+    }
+
+    if (challenge.purpose === 'login_2fa' && user.role !== 'shop_admin') {
+      throw new Error('Access denied: Challenge does not belong to an Administrator.');
     }
 
     // 60-second cooldown
@@ -316,6 +333,8 @@ export class AuthService {
     try {
       if (challenge.purpose === 'super_admin_2fa') {
         await EmailService.sendSuperAdminOtp(challenge.email, newOtpCode);
+      } else if (challenge.purpose === 'login_2fa') {
+        await EmailService.sendAdminOtp(challenge.email, recipientName, newOtpCode);
       } else {
         await EmailService.sendVerificationOtp(challenge.email, recipientName, newOtpCode);
       }
@@ -325,13 +344,13 @@ export class AuthService {
     }
 
     challenge.otpHash = newOtpHash;
-    challenge.expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    challenge.expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     challenge.attempts = 0;
     challenge.resendCount += 1;
     challenge.lastSentAt = new Date();
     await challenge.save();
 
-    return { email: challenge.email, expiresInSeconds: 600 };
+    return { email: challenge.email, expiresInSeconds: 300 };
   }
 
   /**

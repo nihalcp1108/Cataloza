@@ -320,7 +320,7 @@ export const PlatformSettingsPage: React.FC = () => {
         </div>
 
         <p className="text-xs text-slate-500 leading-relaxed">
-          Test your SMTP provider connectivity and verify that OTP delivery to <strong>cpnihal35@gmail.com</strong> is fully operational.
+          Test your SMTP provider connectivity and verify that OTP delivery to the Super Admin registered email is fully operational.
         </p>
 
         {smtpResult && (
@@ -386,7 +386,7 @@ export const PlatformSettingsPage: React.FC = () => {
               setIsSendingTestEmail(true);
               try {
                 const res = await api.post('/super-admin/email/test');
-                toast.success(res.data?.message || 'Test email dispatched to cpnihal35@gmail.com!');
+                toast.success(res.data?.message || 'Test email dispatched to Super Admin registered email!');
               } catch (err: any) {
                 const msg = err.response?.data?.message || err.message;
                 toast.error(`Email delivery failed: ${msg}`);
@@ -396,7 +396,7 @@ export const PlatformSettingsPage: React.FC = () => {
             }}
             icon={<Send className="w-4 h-4" />}
           >
-            Send Test Email to cpnihal35@gmail.com
+            Send Test Email to Super Admin
           </Button>
         </div>
       </div>

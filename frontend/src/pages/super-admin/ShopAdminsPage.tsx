@@ -318,7 +318,7 @@ export const ShopAdminsPage: React.FC = () => {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Rahul Sharma"
+                  placeholder="Full name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -332,7 +332,7 @@ export const ShopAdminsPage: React.FC = () => {
                 <input
                   type="email"
                   required
-                  placeholder="e.g. rahul@distributors.com"
+                  placeholder="Email address"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -345,7 +345,7 @@ export const ShopAdminsPage: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="+91 98765 43210"
+                  placeholder="Phone number"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"

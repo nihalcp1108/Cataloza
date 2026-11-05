@@ -119,6 +119,14 @@ export class AuthController {
           targetEntity: 'User',
           targetId: user._id.toString(),
         });
+      } else if (user.role === 'shop_admin') {
+        await AuditService.logAction({
+          actorId: user._id.toString(),
+          actorRole: user.role,
+          action: 'ADMIN_2FA_LOGIN_SUCCESS',
+          targetEntity: 'User',
+          targetId: user._id.toString(),
+        });
       }
 
       res.status(200).json({
@@ -195,9 +203,14 @@ export class AuthController {
   }
 
   /**
-   * Helper: Dispatch Super Admin 2FA OTP code and create challenge
+   * Helper: Dispatch 2FA OTP code and create challenge for administrators (Super Admin and Dealer Admin)
    */
-  private static async dispatchSuperAdminOtp(req: Request, res: Response, user: IUser): Promise<void> {
+  private static async dispatchLoginOtp(
+    req: Request,
+    res: Response,
+    user: IUser,
+    purpose: 'super_admin_2fa' | 'login_2fa'
+  ): Promise<void> {
     const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
     const recentOtpCount = await OtpChallenge.countDocuments({
       userId: user._id,
@@ -219,12 +232,16 @@ export class AuthController {
     const otpHash = await bcrypt.hash(otpCode, salt);
 
     const challengeId = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes expiration
 
     try {
-      await EmailService.sendSuperAdminOtp(user.email, otpCode);
+      if (purpose === 'super_admin_2fa') {
+        await EmailService.sendSuperAdminOtp(user.email, otpCode);
+      } else {
+        await EmailService.sendAdminOtp(user.email, user.name, otpCode);
+      }
     } catch (deliveryError: any) {
-      console.error('[Auth] Failed to dispatch Super Admin OTP email:', deliveryError.message);
+      console.error(`[Auth] Failed to dispatch ${purpose} email to ${user.email}:`, deliveryError.message);
       res.status(502).json({
         success: false,
         message: `Email delivery failed: ${deliveryError.message}. Please check email service configuration.`,
@@ -237,7 +254,7 @@ export class AuthController {
       userId: user._id,
       email: user.email,
       otpHash,
-      purpose: 'super_admin_2fa',
+      purpose,
       expiresAt,
       attempts: 0,
       maxAttempts: 5,
@@ -251,21 +268,24 @@ export class AuthController {
     await AuditService.logAction({
       actorId: user._id.toString(),
       actorRole: user.role,
-      action: 'SUPER_ADMIN_OTP_DISPATCHED',
+      action: purpose === 'super_admin_2fa' ? 'SUPER_ADMIN_OTP_DISPATCHED' : 'ADMIN_OTP_DISPATCHED',
       targetEntity: 'User',
       targetId: user._id.toString(),
       metadata: { recipient: user.email },
     });
 
+    const maskedEmail = AuthService.maskEmail(user.email);
+
     res.status(200).json({
       success: true,
       requiresOtp: true,
       requiresOTP: true,
-      message: `A 6-digit verification code has been sent to ${user.email}`,
+      message: `A 6-digit verification code has been sent to ${maskedEmail}`,
       data: {
         challengeId,
         email: user.email,
-        expiresInSeconds: 600,
+        maskedEmail,
+        expiresInSeconds: 300,
       },
     });
   }
@@ -274,7 +294,7 @@ export class AuthController {
    * Unified login endpoint
    * Role-based login handling:
    * - super_admin: Validates credentials, dispatches OTP email, returns requiresOtp: true (no tokens)
-   * - shop_admin: Validates credentials, issues JWT immediately, returns requiresOtp: false (no OTP)
+   * - shop_admin: Validates credentials, dispatches OTP email, returns requiresOtp: true (no tokens)
    * - customer: Validates credentials, checks verification status, issues JWT or dispatches reg OTP
    */
   public static async login(req: Request, res: Response): Promise<void> {
@@ -311,32 +331,12 @@ export class AuthController {
           return;
         }
 
-        return AuthController.dispatchSuperAdminOtp(req, res, user);
+        return AuthController.dispatchLoginOtp(req, res, user, 'super_admin_2fa');
       }
 
       if (user.role === 'shop_admin') {
-        // Dealer / Admin: Immediate direct login, NO OTP required, NO OTP email sent
-        if (!user.isVerified) {
-          user.isVerified = true;
-        }
-        user.lastLogin = new Date();
-        await user.save();
-
-        const accessToken = AuthService.generateAccessToken(user);
-        const refreshToken = AuthService.generateRefreshToken(user);
-        AuthService.setAuthCookies(res, accessToken, refreshToken);
-
-        res.status(200).json({
-          success: true,
-          requiresOtp: false,
-          requiresOTP: false,
-          message: 'Login successful',
-          data: {
-            user,
-            accessToken,
-          },
-        });
-        return;
+        // Dealer / Admin: Requires 2FA email OTP verification before tokens are issued
+        return AuthController.dispatchLoginOtp(req, res, user, 'login_2fa');
       }
 
       if (user.role === 'customer') {
@@ -346,7 +346,7 @@ export class AuthController {
           const salt = await bcrypt.genSalt(10);
           const otpHash = await bcrypt.hash(otpCode, salt);
           const challengeId = crypto.randomBytes(32).toString('hex');
-          const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+          const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
           try {
             await EmailService.sendVerificationOtp(user.email, user.name, otpCode);
@@ -370,15 +370,18 @@ export class AuthController {
             userAgent: req.headers['user-agent'],
           });
 
+          const maskedEmail = AuthService.maskEmail(user.email);
+
           res.status(200).json({
             success: true,
             requiresOtp: true,
             requiresOTP: true,
-            message: 'Your email address is not yet verified. A 6-digit verification code has been dispatched to your email.',
+            message: `Your email address is not yet verified. A 6-digit verification code has been dispatched to ${maskedEmail}.`,
             data: {
               challengeId,
               email: user.email,
-              expiresInSeconds: 600,
+              maskedEmail,
+              expiresInSeconds: 300,
             },
           });
           return;
@@ -492,7 +495,7 @@ export class AuthController {
         return;
       }
 
-      return AuthController.dispatchSuperAdminOtp(req, res, user);
+      return AuthController.dispatchLoginOtp(req, res, user, 'super_admin_2fa');
     } catch (error: any) {
       if (isDatabaseError(error)) {
         res.status(503).json({

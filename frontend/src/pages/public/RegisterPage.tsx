@@ -255,7 +255,7 @@ export const RegisterPage: React.FC = () => {
                 <Input
                   label="Full Name or Business Owner"
                   type="text"
-                  placeholder="e.g. Deepak Patel"
+                  placeholder="Full name"
                   leftIcon={<User className="w-4 h-4" />}
                   error={errors.name?.message}
                   {...register('name')}
@@ -265,7 +265,7 @@ export const RegisterPage: React.FC = () => {
                   label="Email Address"
                   type="email"
                   autoComplete="email"
-                  placeholder="name@business.com"
+                  placeholder="Email address"
                   leftIcon={<Mail className="w-4 h-4" />}
                   error={errors.email?.message}
                   {...register('email')}
@@ -274,7 +274,7 @@ export const RegisterPage: React.FC = () => {
                 <Input
                   label="Phone Number"
                   type="tel"
-                  placeholder="+91 98765 43210"
+                  placeholder="Phone number"
                   leftIcon={<Phone className="w-4 h-4" />}
                   helperText="Used for order tracking & delivery notifications."
                   error={errors.phone?.message}
@@ -284,7 +284,7 @@ export const RegisterPage: React.FC = () => {
                 <Input
                   label="Password"
                   type="password"
-                  placeholder="Min. 8 chars, 1 uppercase & 1 number"
+                  placeholder="Password"
                   leftIcon={<Lock className="w-4 h-4" />}
                   error={errors.password?.message}
                   {...register('password')}

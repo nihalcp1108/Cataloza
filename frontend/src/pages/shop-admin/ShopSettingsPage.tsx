@@ -210,13 +210,13 @@ Please confirm stock availability and dispatch schedule.`;
                   type="text"
                   value={whatsappNumber}
                   onChange={(e) => setWhatsappNumber(e.target.value)}
-                  placeholder="e.g. 919876543210 (Country code + digits)"
+                  placeholder="WhatsApp business number"
                   className="w-full text-sm font-mono rounded-xl border border-slate-300 p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                 />
                 <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
               </div>
               <p className="mt-1 text-[11px] text-slate-500">
-                Include country code without + or dashes (e.g., <strong>91</strong> for India followed by 10 digits).
+                Include country code without + or dashes (country code followed by 10 digits).
               </p>
             </div>
 
@@ -309,7 +309,7 @@ Please confirm stock availability and dispatch schedule.`;
             <Input
               label="Shop Name"
               required
-              placeholder="e.g. ABC Wholesale Distributors"
+              placeholder="Shop name"
               {...register('name')}
             />
 
@@ -339,20 +339,20 @@ Please confirm stock availability and dispatch schedule.`;
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Input
               label="Contact Phone"
-              placeholder="+91 98765 43210"
+              placeholder="Contact phone number"
               {...register('contactPhone')}
             />
 
             <Input
               label="Business Email"
               type="email"
-              placeholder="orders@business.com"
+              placeholder="Business email"
               {...register('email')}
             />
 
             <Input
               label="Business Hours"
-              placeholder="Mon - Sat: 9 AM - 8 PM"
+              placeholder="Business hours"
               {...register('businessHours')}
             />
           </div>
@@ -382,7 +382,7 @@ Please confirm stock availability and dispatch schedule.`;
 
           <Input
             label="Street Address / Plot / Warehouse No."
-            placeholder="Plot 42, Central Industrial Area, Phase 2"
+            placeholder="Street address / Industrial area"
             {...register('street')}
           />
 

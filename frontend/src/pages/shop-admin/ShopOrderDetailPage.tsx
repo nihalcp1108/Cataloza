@@ -311,7 +311,7 @@ export const ShopOrderDetailPage: React.FC = () => {
             {newStatus === 'cancelled' && (
               <Input
                 label="Cancellation Reason"
-                placeholder="e.g. Out of stock / Customer requested"
+                placeholder="Reason for cancellation"
                 value={cancellationReason}
                 onChange={(e) => setCancellationReason(e.target.value)}
               />
@@ -319,7 +319,7 @@ export const ShopOrderDetailPage: React.FC = () => {
 
             <Input
               label="Transition Note (Optional)"
-              placeholder="e.g. Transporter LR #123456"
+              placeholder="Transition note / Tracking reference"
               value={statusNote}
               onChange={(e) => setStatusNote(e.target.value)}
             />
@@ -480,14 +480,14 @@ export const ShopOrderDetailPage: React.FC = () => {
 
           <Input
             label="Payment Reference / Bank UTR / NEFT"
-            placeholder="e.g. UTR-9988223344"
+            placeholder="Payment reference (UTR)"
             value={paymentReference}
             onChange={(e) => setPaymentReference(e.target.value)}
           />
 
           <Input
             label="Internal Payment Note (Optional)"
-            placeholder="e.g. Bank statement verified"
+            placeholder="Internal payment note"
             value={paymentNote}
             onChange={(e) => setPaymentNote(e.target.value)}
           />

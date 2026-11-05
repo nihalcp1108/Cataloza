@@ -29,6 +29,18 @@ const loginSchema = z.object({
 
 type LoginFormData = z.infer<typeof loginSchema>;
 
+const maskEmail = (email: string): string => {
+  if (!email || !email.includes('@')) return email || '';
+  const [local, domain] = email.split('@');
+  if (local.length <= 2) {
+    return `${local[0]}***@${domain}`;
+  }
+  const first = local[0];
+  const last = local[local.length - 1];
+  const maskedLength = Math.max(local.length - 2, 3);
+  return `${first}${'*'.repeat(maskedLength)}${last}@${domain}`;
+};
+
 export const LoginPage: React.FC = () => {
   const { login, verifySuperAdminOtp, resendSuperAdminOtp } = useAuth();
   const navigate = useNavigate();
@@ -45,7 +57,8 @@ export const LoginPage: React.FC = () => {
 
   // Step 2: OTP verification states
   const [challengeId, setChallengeId] = useState('');
-  const [targetEmail, setTargetEmail] = useState('cpnihal35@gmail.com');
+  const [targetEmail, setTargetEmail] = useState('');
+  const [maskedEmail, setMaskedEmail] = useState('');
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [otpError, setOtpError] = useState('');
@@ -99,16 +112,18 @@ export const LoginPage: React.FC = () => {
     try {
       const result = await login(data.email, data.password);
 
-      // If Super Admin two-step authentication is triggered
+      // If two-step authentication is triggered (Super Admin or Dealer Admin)
       if (result.requiresOtp && result.challengeId) {
         setChallengeId(result.challengeId);
-        setTargetEmail(result.email || 'cpnihal35@gmail.com');
+        setTargetEmail(result.email || '');
+        const displayMasked = result.maskedEmail || maskEmail(result.email || '');
+        setMaskedEmail(displayMasked);
         setOtpDigits(['', '', '', '', '', '']);
         setOtpError('');
         setResendCooldown(60);
         setExpiresInSeconds(300);
         setAuthStep('otp');
-        toast.success(`Verification code dispatched to ${result.email || 'cpnihal35@gmail.com'}`);
+        toast.success(displayMasked ? `Verification code dispatched to ${displayMasked}` : 'Verification code dispatched to your registered email');
         // Focus first OTP digit after render
         setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
         return;
@@ -235,7 +250,7 @@ export const LoginPage: React.FC = () => {
     setOtpError('');
     try {
       const user = await verifySuperAdminOtp(challengeId, fullCode);
-      toast.success('Super Admin verified successfully. Welcome back!');
+      toast.success('Authentication verified successfully. Welcome back!');
       handlePostLoginRedirect(user);
     } catch (err: any) {
       setOtpError(err.response?.data?.message || err.message || 'Invalid or expired verification code');
@@ -251,7 +266,7 @@ export const LoginPage: React.FC = () => {
     setOtpError('');
     try {
       await resendSuperAdminOtp(challengeId);
-      toast.success(`A fresh verification code was sent to ${targetEmail}`);
+      toast.success(`A fresh verification code was sent to ${maskedEmail || maskEmail(targetEmail)}`);
       setResendCooldown(60);
       setExpiresInSeconds(300);
       setOtpDigits(['', '', '', '', '', '']);
@@ -328,7 +343,7 @@ export const LoginPage: React.FC = () => {
               Two-Factor Authentication
             </h2>
             <p className="mt-1 text-xs text-slate-400">
-              Security verification for Super Administrator
+              Security verification for Administrator sign-in
             </p>
           </div>
         )}
@@ -368,23 +383,12 @@ export const LoginPage: React.FC = () => {
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
                     Email or Username
                   </label>
-                  {import.meta.env.DEV && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setValue('email', 'cpnihal35@gmail.com');
-                      }}
-                      className="text-[11px] font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
-                    >
-                      Fill Super Admin
-                    </button>
-                  )}
                 </div>
                 <div className="relative">
                   <input
                     type="text"
                     autoComplete="username"
-                    placeholder="e.g. cpnihal35@gmail.com or username"
+                    placeholder="Email or username"
                     {...register('email')}
                     className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                   />
@@ -411,7 +415,7 @@ export const LoginPage: React.FC = () => {
                   <input
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
-                    placeholder="••••••••••••"
+                    placeholder="Password"
                     {...register('password')}
                     className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all pr-16"
                   />
@@ -474,7 +478,7 @@ export const LoginPage: React.FC = () => {
                   A verification code has been dispatched to:
                 </p>
                 <p className="font-mono text-sm font-bold text-indigo-300 mt-1 select-all">
-                  {targetEmail}
+                  {maskedEmail || maskEmail(targetEmail) || 'your registered email'}
                 </p>
               </div>
 

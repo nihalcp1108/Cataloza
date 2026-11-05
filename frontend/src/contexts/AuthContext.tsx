@@ -7,6 +7,7 @@ export interface LoginResult {
   requiresOtp?: boolean;
   challengeId?: string;
   email?: string;
+  maskedEmail?: string;
   message?: string;
 }
 
@@ -81,12 +82,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       password,
     });
     
-    // Check if 2FA OTP is required (e.g. for super_admin or unverified registration)
+    // Check if 2FA OTP is required (e.g. for super_admin, shop_admin, or unverified registration)
     if (res.data?.requiresOtp || res.data?.requiresOTP) {
       return {
         requiresOtp: true,
         challengeId: res.data.data?.challengeId,
         email: res.data.data?.email || identifier,
+        maskedEmail: res.data.data?.maskedEmail,
         message: res.data.message,
       };
     }

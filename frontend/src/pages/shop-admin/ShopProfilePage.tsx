@@ -420,7 +420,7 @@ export const ShopProfilePage: React.FC = () => {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Rocoware Ceramics"
+                placeholder="Shop name"
                 required
                 className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
@@ -434,7 +434,7 @@ export const ShopProfilePage: React.FC = () => {
                 type="text"
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
-                placeholder="e.g. Rocoware Sanitaryware Pvt Ltd"
+                placeholder="Registered firm name"
                 className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -447,7 +447,7 @@ export const ShopProfilePage: React.FC = () => {
                 type="text"
                 value={ownerName}
                 onChange={(e) => setOwnerName(e.target.value)}
-                placeholder="e.g. John Doe"
+                placeholder="Owner / Representative name"
                 className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -460,7 +460,7 @@ export const ShopProfilePage: React.FC = () => {
                 type="text"
                 value={businessCategory}
                 onChange={(e) => setBusinessCategory(e.target.value)}
-                placeholder="e.g. Tiles & Sanitaryware, Textiles, Electronics"
+                placeholder="Business categories"
                 className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -475,12 +475,12 @@ export const ShopProfilePage: React.FC = () => {
                   type="text"
                   value={whatsappNumber}
                   onChange={(e) => setWhatsappNumber(e.target.value)}
-                  placeholder="e.g. 919876543210"
+                  placeholder="WhatsApp order number"
                   required
                   className="w-full text-xs font-medium pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-              <p className="text-[10px] text-slate-400 mt-1">International format without symbols (e.g. 919876543210 for India)</p>
+              <p className="text-[10px] text-slate-400 mt-1">International format without symbols (country code followed by mobile digits)</p>
             </div>
 
             <div>
@@ -493,7 +493,7 @@ export const ShopProfilePage: React.FC = () => {
                   type="text"
                   value={contactPhone}
                   onChange={(e) => setContactPhone(e.target.value)}
-                  placeholder="e.g. 022 12345678"
+                  placeholder="Office contact phone"
                   className="w-full text-xs font-medium pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -509,7 +509,7 @@ export const ShopProfilePage: React.FC = () => {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="orders@rocoware.com"
+                  placeholder="Business email address"
                   className="w-full text-xs font-medium pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -565,7 +565,7 @@ export const ShopProfilePage: React.FC = () => {
                 type="text"
                 value={addressLine1}
                 onChange={(e) => setAddressLine1(e.target.value)}
-                placeholder="e.g. Unit 4B, Industrial Estate, Phase 2"
+                placeholder="Address line 1"
                 className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -578,7 +578,7 @@ export const ShopProfilePage: React.FC = () => {
                 type="text"
                 value={addressLine2}
                 onChange={(e) => setAddressLine2(e.target.value)}
-                placeholder="e.g. Near Cargo Hub, Highway Road"
+                placeholder="Landmark / Street (Optional)"
                 className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -589,7 +589,7 @@ export const ShopProfilePage: React.FC = () => {
                 type="text"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                placeholder="e.g. Mumbai"
+                placeholder="City"
                 className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -600,7 +600,7 @@ export const ShopProfilePage: React.FC = () => {
                 type="text"
                 value={district}
                 onChange={(e) => setDistrict(e.target.value)}
-                placeholder="e.g. Thane"
+                placeholder="District"
                 className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -611,7 +611,7 @@ export const ShopProfilePage: React.FC = () => {
                 type="text"
                 value={state}
                 onChange={(e) => setState(e.target.value)}
-                placeholder="e.g. Maharashtra"
+                placeholder="State"
                 className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -622,7 +622,7 @@ export const ShopProfilePage: React.FC = () => {
                 type="text"
                 value={postalCode}
                 onChange={(e) => setPostalCode(e.target.value)}
-                placeholder="e.g. 400001"
+                placeholder="PIN Code"
                 className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -660,7 +660,7 @@ export const ShopProfilePage: React.FC = () => {
                   type="text"
                   value={gstNumber}
                   onChange={(e) => setGstNumber(e.target.value)}
-                  placeholder="e.g. 27ABCDE1234F1Z5"
+                  placeholder="GSTIN number"
                   className="w-full text-xs font-medium pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase"
                 />
               </div>
@@ -676,7 +676,7 @@ export const ShopProfilePage: React.FC = () => {
                   type="text"
                   value={businessHours}
                   onChange={(e) => setBusinessHours(e.target.value)}
-                  placeholder="e.g. Mon - Sat: 9:00 AM - 7:00 PM"
+                  placeholder="Operating hours"
                   className="w-full text-xs font-medium pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>

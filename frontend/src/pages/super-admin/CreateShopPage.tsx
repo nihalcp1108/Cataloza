@@ -322,14 +322,14 @@ export const CreateShopPage: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Shop Public Name"
-              placeholder="e.g. ABC Ceramics & Hardware"
+              placeholder="Shop public name"
               error={errors.name?.message}
               {...register('name', { onBlur: handleNameBlur })}
             />
 
             <Input
               label="Registered Business / Legal Name"
-              placeholder="e.g. ABC Distributors Pvt Ltd"
+              placeholder="Registered business / legal name"
               error={errors.businessName?.message}
               {...register('businessName')}
             />
@@ -338,7 +338,7 @@ export const CreateShopPage: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Unique Catalogue URL Slug"
-              placeholder="e.g. abc-ceramics"
+              placeholder="Unique catalogue URL slug"
               helperText={`Final URL: ${window.location.origin}/${slugValue || 'your-slug'}`}
               error={errors.slug?.message}
               {...register('slug')}
@@ -346,7 +346,7 @@ export const CreateShopPage: React.FC = () => {
 
             <Input
               label="Business Category"
-              placeholder="e.g. Building Materials, Textiles, Electronics"
+              placeholder="Business categories"
               error={errors.businessCategory?.message}
               {...register('businessCategory')}
             />
@@ -367,7 +367,7 @@ export const CreateShopPage: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Input
               label="WhatsApp Ordering Number"
-              placeholder="919876543210 (country code + digits)"
+              placeholder="WhatsApp ordering number"
               helperText="Prefilled order bills will be sent to this line."
               error={errors.whatsappNumber?.message}
               {...register('whatsappNumber')}
@@ -375,14 +375,14 @@ export const CreateShopPage: React.FC = () => {
 
             <Input
               label="Contact Phone"
-              placeholder="+91 98765 43210"
+              placeholder="Contact phone number"
               {...register('contactPhone')}
             />
 
             <Input
               label="Business Email"
               type="email"
-              placeholder="orders@business.com"
+              placeholder="Business email"
               error={errors.email?.message}
               {...register('email')}
             />
@@ -393,7 +393,7 @@ export const CreateShopPage: React.FC = () => {
             <span className="text-xs font-bold text-slate-700 block">Warehouse / Depot Address</span>
             <Input
               label="Street Address / Industrial Plot"
-              placeholder="Plot 42, Central Industrial Area"
+              placeholder="Street address / Industrial plot"
               {...register('street')}
             />
 
@@ -407,7 +407,7 @@ export const CreateShopPage: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
                 label="GST Number (Optional)"
-                placeholder="29ABCDE1234F1Z5"
+                placeholder="GSTIN number"
                 {...register('gstNumber')}
               />
             </div>
@@ -428,7 +428,7 @@ export const CreateShopPage: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Administrator Full Name"
-              placeholder="e.g. Ramesh Sharma"
+              placeholder="Administrator full name"
               error={errors.adminName?.message}
               {...register('adminName')}
             />
@@ -436,7 +436,7 @@ export const CreateShopPage: React.FC = () => {
             <Input
               label="Admin Login Email"
               type="email"
-              placeholder="admin@business.com"
+              placeholder="Admin login email"
               error={errors.adminEmail?.message}
               {...register('adminEmail')}
             />
@@ -446,14 +446,14 @@ export const CreateShopPage: React.FC = () => {
             <Input
               label="Admin Password"
               type="password"
-              placeholder="Min. 8 characters"
+              placeholder="Password"
               error={errors.adminPassword?.message}
               {...register('adminPassword')}
             />
 
             <Input
               label="Admin Mobile Phone"
-              placeholder="+91 98765 43210"
+              placeholder="Admin mobile phone"
               {...register('adminPhone')}
             />
           </div>
@@ -617,13 +617,13 @@ export const CreateShopPage: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Transaction Reference / UTR Number"
-              placeholder="e.g. UTR-9824028402"
+              placeholder="UTR / Transaction reference"
               {...register('transactionReference')}
             />
 
             <Input
               label="Payment / Accounting Notes"
-              placeholder="e.g. Annual dealership contract signed"
+              placeholder="Payment / Accounting notes"
               {...register('paymentNotes')}
             />
           </div>
