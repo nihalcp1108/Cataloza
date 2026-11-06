@@ -194,9 +194,16 @@ export class AuthController {
         return;
       }
 
-      const statusCode = error.message?.includes('wait') || error.message?.includes('Maximum') ? 429 : 400;
+      const isSandbox =
+        error.code === 'RESEND_SANDBOX_RESTRICTION' ||
+        error.name === 'ResendSandboxRestrictionError' ||
+        error.message?.includes('sandbox testing restriction') ||
+        error.message?.includes('testing emails to your own email address');
+
+      const statusCode = error.message?.includes('wait') || error.message?.includes('Maximum') ? 429 : isSandbox ? 502 : 400;
       res.status(statusCode).json({
         success: false,
+        error: isSandbox ? 'RESEND_SANDBOX_RESTRICTION' : undefined,
         message: error.message || 'Failed to resend verification code',
       });
     }
@@ -242,9 +249,26 @@ export class AuthController {
       }
     } catch (deliveryError: any) {
       console.error(`[Auth] Failed to dispatch ${purpose} email to ${user.email}:`, deliveryError.message);
+
+      const isSandboxRestriction =
+        deliveryError.code === 'RESEND_SANDBOX_RESTRICTION' ||
+        deliveryError.name === 'ResendSandboxRestrictionError' ||
+        deliveryError.message?.includes('sandbox testing restriction') ||
+        deliveryError.message?.includes('testing emails to your own email address');
+
       res.status(502).json({
         success: false,
-        message: `Email delivery failed: ${deliveryError.message}. Please check email service configuration.`,
+        error: isSandboxRestriction ? 'RESEND_SANDBOX_RESTRICTION' : 'EMAIL_DELIVERY_FAILED',
+        message: deliveryError.message,
+        details: isSandboxRestriction
+          ? {
+              reason: 'resend_sandbox_restriction',
+              from: config.resend.from,
+              recipient: user.email,
+              actionRequired:
+                'Verify your custom sending domain in the Resend Dashboard (https://resend.com/domains) and set RESEND_FROM_EMAIL in your environment.',
+            }
+          : undefined,
       });
       return;
     }

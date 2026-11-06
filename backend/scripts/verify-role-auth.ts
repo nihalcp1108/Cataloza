@@ -7,7 +7,7 @@ import { OtpChallenge } from '../src/models/OtpChallenge';
 import { AuthService } from '../src/services/auth.service';
 import { AuthController } from '../src/controllers/auth.controller';
 import { ShopAdminController } from '../src/controllers/shopAdmin.controller';
-import { EmailService } from '../src/services/email.service';
+import { EmailService, ResendSandboxRestrictionError } from '../src/services/email.service';
 
 async function runTests() {
   console.log('===========================================================');
@@ -507,6 +507,134 @@ async function runTests() {
     assert(Boolean(demoShop), 'Demo shop "cataloza-demo-store" exists in database');
     assert(demoShop?.isDemo === true, 'Demo shop has isDemo === true');
     assert(demoShop?.name === 'Cataloza Demo Store', 'Demo shop name is Cataloza Demo Store');
+
+    // -------------------------------------------------------------
+    // Test 15: Email Delivery Failure (Network / Outage) -> Unverified Login
+    // -------------------------------------------------------------
+    console.log('\n--- Test 15: Email Delivery Failure -> Login Remains Unverified ---');
+    await OtpChallenge.deleteMany({ userId: shopAdmin._id });
+    // Temporarily mock sendAdminOtp to simulate email service failure
+    EmailService.sendAdminOtp = async () => {
+      throw new Error('Outbound email network socket timeout');
+    };
+
+    const deliveryFailCtx = mockReqRes({ email: testAdminEmail, password: testAdminPassword });
+    await AuthController.login(deliveryFailCtx.req, deliveryFailCtx.res);
+
+    assert(deliveryFailCtx.getStatus() === 502, 'Email delivery failure returns HTTP 502 Bad Gateway');
+    assert(deliveryFailCtx.getData()?.success === false, 'Response success is false on email failure');
+    assert(deliveryFailCtx.getData()?.error === 'EMAIL_DELIVERY_FAILED', 'Error code is EMAIL_DELIVERY_FAILED');
+    assert(deliveryFailCtx.getData()?.message?.includes('socket timeout'), 'Error message contains root failure detail');
+    assert(!deliveryFailCtx.getData()?.data?.accessToken, 'No accessToken issued when email delivery fails');
+    assert(deliveryFailCtx.getCookies().length === 0, 'No auth cookies set when email delivery fails');
+
+    // -------------------------------------------------------------
+    // Test 16: Resend Sandbox Testing Restriction Detection & Actionable Guidance
+    // -------------------------------------------------------------
+    console.log('\n--- Test 16: Resend Sandbox Testing Restriction Detection ---');
+    await OtpChallenge.deleteMany({ userId: shopAdmin._id });
+    // Mock sendAdminOtp to simulate Resend sandbox rejection for external recipient
+    EmailService.sendAdminOtp = async (to: string) => {
+      throw new ResendSandboxRestrictionError(to, 'cpnihal35@gmail.com');
+    };
+
+    const sandboxFailCtx = mockReqRes({ email: testAdminEmail, password: testAdminPassword });
+    await AuthController.login(sandboxFailCtx.req, sandboxFailCtx.res);
+
+    assert(sandboxFailCtx.getStatus() === 502, 'Sandbox restriction returns HTTP 502 Bad Gateway');
+    assert(sandboxFailCtx.getData()?.error === 'RESEND_SANDBOX_RESTRICTION', 'Error code is RESEND_SANDBOX_RESTRICTION');
+    assert(sandboxFailCtx.getData()?.message?.includes('Resend sandbox testing restriction'), 'Descriptive sandbox error message returned');
+    assert(sandboxFailCtx.getData()?.message?.includes('cpnihal35@gmail.com'), 'Mentions verified account email cpnihal35@gmail.com');
+    assert(sandboxFailCtx.getData()?.details?.actionRequired?.includes('resend.com/domains'), 'Includes domain verification instructions');
+    assert(!sandboxFailCtx.getData()?.data?.accessToken, 'Access token is NOT issued on sandbox rejection');
+
+    // Restore stub
+    EmailService.sendAdminOtp = async (to: string, name: string, otp: string) => {
+      sentEmails.adminOtps.push({ to, name, otp });
+      return { id: `mock-admin-msg-${Date.now()}` };
+    };
+
+    // -------------------------------------------------------------
+    // Test 17: Multiple Dealer Admin Accounts with Different Email Addresses
+    // -------------------------------------------------------------
+    console.log('\n--- Test 17: Multiple Dealer Admin Accounts with Different Email Addresses ---');
+    const dealerOneEmail = 'dealer_north@example.com';
+    const dealerTwoEmail = 'dealer_south@example.com';
+    const dealerPassword = 'DealerSecurePass2026!';
+    const dealerHash = await bcrypt.hash(dealerPassword, salt);
+
+    await User.deleteMany({ email: { $in: [dealerOneEmail, dealerTwoEmail] } });
+    await OtpChallenge.deleteMany({ email: { $in: [dealerOneEmail, dealerTwoEmail] } });
+
+    const dealerOne = await User.create({
+      name: 'North Dealer Admin',
+      email: dealerOneEmail,
+      phone: '9876543210',
+      passwordHash: dealerHash,
+      role: 'shop_admin',
+      assignedShopIds: [],
+      isActive: true,
+      isVerified: true,
+    });
+
+    const dealerTwo = await User.create({
+      name: 'South Dealer Admin',
+      email: dealerTwoEmail,
+      phone: '9876543211',
+      passwordHash: dealerHash,
+      role: 'shop_admin',
+      assignedShopIds: [],
+      isActive: true,
+      isVerified: true,
+    });
+
+    // 17A: Dealer 1 initiates login
+    sentEmails.adminOtps = [];
+    const dealerOneLoginCtx = mockReqRes({ email: dealerOneEmail, password: dealerPassword });
+    await AuthController.login(dealerOneLoginCtx.req, dealerOneLoginCtx.res);
+
+    assert(dealerOneLoginCtx.getStatus() === 200, 'Dealer 1 login request succeeds');
+    assert(dealerOneLoginCtx.getData()?.requiresOtp === true, 'Dealer 1 requires OTP verification');
+    const dealerOneChallengeId = dealerOneLoginCtx.getData()?.data?.challengeId;
+    assert(Boolean(dealerOneChallengeId), 'Dealer 1 receives challengeId');
+    assert(sentEmails.adminOtps.some(e => e.to === dealerOneEmail), 'OTP was dispatched to Dealer 1 email address');
+    const dealerOneCode = sentEmails.adminOtps.find(e => e.to === dealerOneEmail)?.otp;
+
+    // 17B: Dealer 2 initiates login
+    const dealerTwoLoginCtx = mockReqRes({ email: dealerTwoEmail, password: dealerPassword });
+    await AuthController.login(dealerTwoLoginCtx.req, dealerTwoLoginCtx.res);
+
+    assert(dealerTwoLoginCtx.getStatus() === 200, 'Dealer 2 login request succeeds');
+    assert(dealerTwoLoginCtx.getData()?.requiresOtp === true, 'Dealer 2 requires OTP verification');
+    const dealerTwoChallengeId = dealerTwoLoginCtx.getData()?.data?.challengeId;
+    assert(Boolean(dealerTwoChallengeId), 'Dealer 2 receives challengeId');
+    assert(sentEmails.adminOtps.some(e => e.to === dealerTwoEmail), 'OTP was dispatched to Dealer 2 email address');
+    const dealerTwoCode = sentEmails.adminOtps.find(e => e.to === dealerTwoEmail)?.otp;
+
+    assert(dealerOneChallengeId !== dealerTwoChallengeId, 'Dealer 1 and Dealer 2 have separate distinct challenge IDs');
+
+    // 17C: Cross-verification rejection (Dealer 1 cannot use Dealer 2 code on Dealer 1 challenge)
+    const crossVerifyCtx2 = mockReqRes({ challengeId: dealerOneChallengeId, otp: dealerTwoCode });
+    await AuthController.verifyOtp(crossVerifyCtx2.req, crossVerifyCtx2.res);
+    assert(crossVerifyCtx2.getStatus() === 400, 'Cross-verifying Dealer 2 OTP on Dealer 1 challenge is rejected');
+
+    // 17D: Verify Dealer 1 successfully
+    const dealerOneVerifyCtx = mockReqRes({ challengeId: dealerOneChallengeId, otp: dealerOneCode });
+    await AuthController.verifyOtp(dealerOneVerifyCtx.req, dealerOneVerifyCtx.res);
+    assert(dealerOneVerifyCtx.getStatus() === 200, 'Dealer 1 OTP verification succeeds');
+    assert(dealerOneVerifyCtx.getData()?.data?.user?.email === dealerOneEmail, 'Dealer 1 session resolves to dealer 1 email');
+    assert(dealerOneVerifyCtx.getData()?.data?.user?.role === 'shop_admin', 'Dealer 1 role is shop_admin');
+
+    // 17E: Verify Dealer 2 successfully
+    const dealerTwoVerifyCtx = mockReqRes({ challengeId: dealerTwoChallengeId, otp: dealerTwoCode });
+    await AuthController.verifyOtp(dealerTwoVerifyCtx.req, dealerTwoVerifyCtx.res);
+    assert(dealerTwoVerifyCtx.getStatus() === 200, 'Dealer 2 OTP verification succeeds');
+    assert(dealerTwoVerifyCtx.getData()?.data?.user?.email === dealerTwoEmail, 'Dealer 2 session resolves to dealer 2 email');
+    assert(dealerTwoVerifyCtx.getData()?.data?.user?.role === 'shop_admin', 'Dealer 2 role is shop_admin');
+
+    // Cleanup extra dealer accounts
+    await User.deleteMany({ email: { $in: [dealerOneEmail, dealerTwoEmail] } });
+    await OtpChallenge.deleteMany({ email: { $in: [dealerOneEmail, dealerTwoEmail] } });
 
     // -------------------------------------------------------------
     // Cleanup

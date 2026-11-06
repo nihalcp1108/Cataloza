@@ -341,7 +341,7 @@ export class AuthService {
       }
     } catch (err: any) {
       console.error(`[Auth] Failed to resend verification OTP to ${challenge.email}:`, err.message);
-      throw new Error(`Email delivery failed: ${err.message}`);
+      throw err;
     }
 
     challenge.otpHash = newOtpHash;

@@ -14,10 +14,29 @@ export interface EmailDiagnosticResult {
   provider: string;
   from?: string;
   missingVariables?: string[];
+  isSandbox?: boolean;
 }
 
 // Backwards-compatible alias for any legacy imports
 export type SmtpDiagnosticResult = EmailDiagnosticResult;
+
+export class ResendSandboxRestrictionError extends Error {
+  public readonly statusCode = 502;
+  public readonly code = 'RESEND_SANDBOX_RESTRICTION';
+  public readonly recipient: string;
+  public readonly ownerEmail: string;
+
+  constructor(recipient: string, ownerEmail: string = 'cpnihal35@gmail.com') {
+    super(
+      `Resend sandbox testing restriction: You can only send testing emails to your verified account email (${ownerEmail}). ` +
+      `To deliver OTP verification emails to dealer accounts (${recipient}), please add and verify your custom domain at https://resend.com/domains ` +
+      `and configure RESEND_FROM_EMAIL="Cataloza <noreply@YOUR_VERIFIED_DOMAIN>" in backend/.env.`
+    );
+    this.name = 'ResendSandboxRestrictionError';
+    this.recipient = recipient;
+    this.ownerEmail = ownerEmail;
+  }
+}
 
 export class EmailService {
   private static resendClient: Resend | null = null;
@@ -69,6 +88,14 @@ export class EmailService {
       throw new Error(`Invalid recipient email address: "${options.to}"`);
     }
 
+    if (config.resend.isPlaceholderDomain) {
+      throw new Error(
+        'Resend configuration error: RESEND_FROM_EMAIL contains placeholder "<noreply@YOUR_VERIFIED_DOMAIN>". ' +
+        'Please replace YOUR_VERIFIED_DOMAIN with your actual verified sending domain in Resend (https://resend.com/domains) ' +
+        'or use the default sandbox sender "Cataloza <onboarding@resend.dev>" for testing to cpnihal35@gmail.com.'
+      );
+    }
+
     try {
       const { data, error } = await resend.emails.send({
         from: fromAddress,
@@ -81,20 +108,31 @@ export class EmailService {
       if (error) {
         console.error(`[EmailService] ❌ Resend API delivery failed for ${sanitizedTo}:`, error.message);
 
-        // Handle Resend onboarding sandbox restrictions
-        if (
-          error.statusCode === 403 &&
-          error.message?.includes('You can only send testing emails to your own email address')
-        ) {
-          throw new Error(
-            `Resend sandbox testing restriction: ${error.message} ` +
-            `(To deliver emails to general users in production, please verify your custom domain at https://resend.com/domains and set RESEND_FROM_EMAIL).`
+        // Detect Resend onboarding sandbox restrictions
+        const isSandboxError =
+          error.statusCode === 403 ||
+          error.message?.includes('testing emails to your own email address') ||
+          error.message?.includes('resend.com/domains') ||
+          error.message?.includes('sandbox testing restriction');
+
+        if (isSandboxError) {
+          throw new ResendSandboxRestrictionError(
+            sanitizedTo,
+            config.superAdmin.email || 'cpnihal35@gmail.com'
           );
         }
 
         // Handle rate limiting (Free tier: 2 requests/second)
         if (error.statusCode === 429) {
           throw new Error('Resend rate limit exceeded (max 2 requests/sec on free tier). Please retry in a few moments.');
+        }
+
+        // Handle unverified custom domain error
+        if (error.message?.includes('is not verified') || error.message?.includes('Domain not verified')) {
+          throw new Error(
+            `Resend domain verification error: ${error.message}. ` +
+            `Please complete DNS verification for your domain at https://resend.com/domains.`
+          );
         }
 
         // Handle invalid API keys or validation errors
@@ -113,10 +151,12 @@ export class EmailService {
       return { id: data.id };
     } catch (err: any) {
       if (
-        err.message &&
-        (err.message.startsWith('Resend') ||
-          err.message.startsWith('Email delivery failed') ||
-          err.message.startsWith('Invalid recipient'))
+        err instanceof ResendSandboxRestrictionError ||
+        err.name === 'ResendSandboxRestrictionError' ||
+        (err.message &&
+          (err.message.startsWith('Resend') ||
+            err.message.startsWith('Email delivery failed') ||
+            err.message.startsWith('Invalid recipient')))
       ) {
         throw err;
       }

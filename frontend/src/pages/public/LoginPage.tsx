@@ -43,7 +43,7 @@ const maskEmail = (email: string): string => {
 };
 
 export const LoginPage: React.FC = () => {
-  const { login, exploreDemo, verifySuperAdminOtp, resendSuperAdminOtp } = useAuth();
+  const { login, exploreDemo, verifyOtp, resendOtp, verifySuperAdminOtp, resendSuperAdminOtp } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -52,6 +52,7 @@ export const LoginPage: React.FC = () => {
 
   // Step 1: Login states
   const [errorMessage, setErrorMessage] = useState('');
+  const [sandboxNotice, setSandboxNotice] = useState<{ message: string; details?: any } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExploringDemo, setIsExploringDemo] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -111,6 +112,7 @@ export const LoginPage: React.FC = () => {
   const onCredentialsSubmit = async (data: LoginFormData) => {
     setIsSubmitting(true);
     setErrorMessage('');
+    setSandboxNotice(null);
     try {
       const result = await login(data.email, data.password);
 
@@ -137,13 +139,27 @@ export const LoginPage: React.FC = () => {
     } catch (err: any) {
       const status = err.response?.status;
       const serverMessage = err.response?.data?.message;
+      const errorCode = err.response?.data?.error;
+      const errorDetails = err.response?.data?.details;
 
       if (status === 401) {
         setErrorMessage(serverMessage || 'Invalid email or password');
       } else if (status === 429) {
         setErrorMessage(serverMessage || 'Too many attempts. Please wait a few minutes before trying again.');
       } else if (status === 502) {
-        setErrorMessage(serverMessage || 'Email delivery failed. Please verify SMTP settings in backend.');
+        const isSandbox =
+          errorCode === 'RESEND_SANDBOX_RESTRICTION' ||
+          serverMessage?.includes('sandbox testing restriction') ||
+          serverMessage?.includes('testing emails to your own email address');
+
+        if (isSandbox) {
+          setSandboxNotice({
+            message: serverMessage,
+            details: errorDetails,
+          });
+        } else {
+          setErrorMessage(serverMessage || 'Email delivery failed. Please check Resend email configuration.');
+        }
       } else if (!err.response) {
         setErrorMessage('Authentication service is currently unreachable. Please verify that the backend is running.');
       } else {
@@ -269,7 +285,7 @@ export const LoginPage: React.FC = () => {
     setIsVerifyingOtp(true);
     setOtpError('');
     try {
-      const user = await verifySuperAdminOtp(challengeId, fullCode);
+      const user = await verifyOtp(challengeId, fullCode);
       toast.success('Authentication verified successfully. Welcome back!');
       handlePostLoginRedirect(user);
     } catch (err: any) {
@@ -285,7 +301,7 @@ export const LoginPage: React.FC = () => {
     setIsResending(true);
     setOtpError('');
     try {
-      await resendSuperAdminOtp(challengeId);
+      await resendOtp(challengeId);
       toast.success(`A fresh verification code was sent to ${maskedEmail || maskEmail(targetEmail)}`);
       setResendCooldown(60);
       setExpiresInSeconds(300);
@@ -391,7 +407,36 @@ export const LoginPage: React.FC = () => {
           {/* ============================================================== */}
           {authStep === 'login' && (
             <form className="space-y-5" onSubmit={handleSubmit(onCredentialsSubmit)}>
-              {errorMessage && (
+              {sandboxNotice && (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-2.5">
+                  <div className="flex items-center gap-2 font-bold text-amber-300">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                    <span>Email Delivery Restriction (Resend Sandbox)</span>
+                  </div>
+                  <p className="leading-relaxed text-slate-300">
+                    {sandboxNotice.message}
+                  </p>
+                  <div className="pt-2 border-t border-amber-500/20 text-[11px] text-amber-300/90 space-y-1">
+                    <p className="font-semibold text-amber-200">How to deliver to all Dealer Admins:</p>
+                    <p>
+                      1. Verify your custom domain in the{' '}
+                      <a
+                        href="https://resend.com/domains"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline font-bold text-amber-300 hover:text-white"
+                      >
+                        Resend Domains Dashboard &rarr;
+                      </a>
+                    </p>
+                    <p>
+                      2. Configure <code className="bg-slate-950 px-1.5 py-0.5 rounded text-amber-300 font-mono">RESEND_FROM_EMAIL="Cataloza &lt;noreply@YOUR_VERIFIED_DOMAIN&gt;"</code> in your production environment variables.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {errorMessage && !sandboxNotice && (
                 <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-start gap-3 text-rose-400 text-xs">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <span className="leading-relaxed">{errorMessage}</span>

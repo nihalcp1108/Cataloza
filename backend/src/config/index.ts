@@ -17,6 +17,25 @@ const rawMongoUri = (
   .replace(/^DATABASE_URL=/, '')
   .trim();
 
+// Resend Email Delivery Configuration
+const rawResendFrom = (
+  process.env.RESEND_FROM_EMAIL ||
+  process.env.EMAIL_FROM ||
+  'Cataloza <onboarding@resend.dev>'
+)
+  .replace(/^["']|["']$/g, '')
+  .trim();
+
+const resendEmailMatch =
+  rawResendFrom.match(/<([^>]+)>/) ||
+  rawResendFrom.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+const resendSenderEmail = resendEmailMatch ? resendEmailMatch[1].trim().toLowerCase() : 'onboarding@resend.dev';
+const resendDomain = resendSenderEmail.split('@')[1] || 'resend.dev';
+const isPlaceholderDomain =
+  rawResendFrom.includes('YOUR_VERIFIED_DOMAIN') || resendDomain.includes('YOUR_VERIFIED_DOMAIN');
+const isResendSandbox =
+  resendDomain.toLowerCase() === 'resend.dev' || resendSenderEmail.includes('onboarding@resend.dev');
+
 export const config = {
   env: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
@@ -50,7 +69,11 @@ export const config = {
 
   resend: {
     apiKey: (process.env.RESEND_API_KEY || '').trim(),
-    from: (process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || 'Cataloza <onboarding@resend.dev>').replace(/^["']|["']$/g, '').trim(),
+    from: rawResendFrom,
+    senderEmail: resendSenderEmail,
+    domain: resendDomain,
+    isSandbox: isResendSandbox,
+    isPlaceholderDomain,
   },
 
   smtp: {
