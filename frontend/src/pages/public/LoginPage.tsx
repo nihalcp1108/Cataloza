@@ -379,7 +379,7 @@ export const LoginPage: React.FC = () => {
               Two-Factor Authentication
             </h2>
             <p className="mt-1 text-xs text-slate-400">
-              Security verification for Administrator sign-in
+              Security verification for Super Administrator sign-in
             </p>
           </div>
         )}
